@@ -1,0 +1,68 @@
+import { useState } from 'react'
+import { ArrowRight, CheckCheck, Eye, Presentation } from 'lucide-react'
+import { Button, Card, Badge } from '../../common/ui'
+import InAppFileViewer from '../../profile/InAppFileViewer'
+
+// Slide Decks section: lists the trainer-uploaded slide/PDF files for the course.
+// Always accessible; friendly empty state when none have been uploaded.
+export default function PPTSection({ course, done, onComplete }) {
+  const [viewing, setViewing] = useState(null)
+
+  return (
+    <Card className="p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="flex items-center gap-2 font-semibold text-primary-deep">
+            <Presentation size={18} className="text-primary" /> Slide Decks
+          </h3>
+          <p className="text-sm text-slate-muted">Presentation decks shared by the trainer for {course.title}.</p>
+        </div>
+        {done && <Badge tone="green"><CheckCheck size={13} /> Slides reviewed</Badge>}
+      </div>
+
+      {course.slides && course.slides.length ? (
+        <div className="mt-5 space-y-2">
+          {course.slides.map((m) => (
+            <div key={m.id} className="flex items-center justify-between rounded-xl border border-border-soft bg-sky-soft px-4 py-3">
+              <button onClick={() => setViewing(m)} className="flex items-center gap-3 text-left">
+                <span className="grid h-9 w-9 place-items-center rounded-lg bg-white text-primary"><Presentation size={16} /></span>
+                <span>
+                  <span className="block text-sm font-medium text-primary-deep">{m.title || m.name}</span>
+                  <span className="block text-xs text-slate-muted">
+                    {(m.fileType || m.type || 'file').toUpperCase()}
+                    {m.size ? ` · ${(m.size / 1024).toFixed(0)} KB` : ''}
+                  </span>
+                </span>
+              </button>
+              <button className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-medium text-primary hover:bg-sky-light" onClick={() => setViewing(m)}>
+                <Eye size={14} /> View
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-5 rounded-xl border border-dashed border-border-soft bg-sky-soft p-6 text-center">
+          <p className="text-sm text-slate-muted">No slide decks available yet.</p>
+          <p className="mt-1 text-xs text-slate-muted">The trainer has not uploaded slide decks for this course. Check back later.</p>
+        </div>
+      )}
+
+      {course.slides && course.slides.length > 0 && !done && onComplete && (
+        <div className="mt-5 flex justify-end border-t border-border-subtle pt-4">
+          <Button onClick={onComplete}>
+            Mark Slide Decks as Reviewed <ArrowRight size={16} />
+          </Button>
+        </div>
+      )}
+
+      <InAppFileViewer
+        open={!!viewing}
+        onClose={() => setViewing(null)}
+        fileURL={viewing?.fileURL}
+        fileType={viewing?.fileType}
+        title={viewing?.title || viewing?.name}
+        fileName={viewing?.name}
+      />
+    </Card>
+  )
+}
