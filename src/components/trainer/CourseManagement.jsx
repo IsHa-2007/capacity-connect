@@ -4,11 +4,11 @@ import {
   BookOpen,
   CheckSquare,
   ChevronLeft,
+  Download,
   Eye,
   FileText,
   FileUp,
   FolderOpen,
-  Link2,
   Loader2,
   PlayCircle,
   Plus,
@@ -16,13 +16,16 @@ import {
   Save,
   Trash2,
   Users,
+  Award,
   Edit3,
+  Upload,
   AlertTriangle,
 } from 'lucide-react'
 import { Card, Button, Badge, Tabs, Modal, EmptyState } from '../common/ui'
 import InAppFileViewer from '../profile/InAppFileViewer'
 import { useCourses } from '../../context/CourseContext'
 import { forFolderError, isValidQuestion, MIN_VALID_QUESTIONS } from '../../services/courseService'
+import { exportCertificatePDF } from '../../utils/pdfExport'
 
 // Module 3 course workspace. The five content/publishing stages map to:
 // Study Notes, Slide Decks, Video Lectures, Practice, then Assessment (Question
@@ -384,19 +387,11 @@ function SectionManager({ course, section, icon: Icon, title, empty }) {
 function VideoManager({ course }) {
   const { addContent, removeContent, uploadCourseFile } = useCourses()
   const [title, setTitle] = useState('')
-  const [url, setUrl] = useState('')
-  const [mode, setMode] = useState('link') // link | upload
   const [uploading, setUploading] = useState(false)
   const [viewing, setViewing] = useState(null)
   const [err, setErr] = useState('')
   const fileRef = useRef(null)
   const videos = course.videos || []
-  const addLink = () => {
-    if (!title.trim()) return
-    addContent(course.id, 'videos', { title: title.trim(), url: url.trim(), type: 'video', duration: '—', fileType: 'link' })
-    setTitle('')
-    setUrl('')
-  }
   const handleFile = async (file) => {
     if (!file) return
     setErr('')
@@ -437,35 +432,29 @@ function VideoManager({ course }) {
 
       <div className="mt-3 flex gap-2">
         <button
-          onClick={() => setMode('link')}
-          className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === 'link' ? 'bg-primary text-white' : 'bg-sky-soft text-primary hover:bg-sky-light'}`}
+          onClick={() => fileRef.current?.click()}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-dark"
+          disabled={uploading}
         >
-          Add by Link
-        </button>
-        <button
-          onClick={() => setMode('upload')}
-          className={`rounded-lg px-3 py-1.5 text-xs font-medium ${mode === 'upload' ? 'bg-primary text-white' : 'bg-sky-soft text-primary hover:bg-sky-light'}`}
-        >
-          Upload Video File
+          <Upload size={13} /> Upload Video File
         </button>
       </div>
 
-      {mode === 'link' ? (
-        <div className="mt-4 flex flex-col gap-3 rounded-xl border border-border-soft bg-sky-soft p-4 sm:flex-row sm:items-center">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title" className="inp flex-1" />
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Video URL / link" className="inp flex-1" />
-          <Button variant="secondary" size="sm" onClick={addLink} disabled={!title.trim()}><Link2 size={15} /> Add Video Link</Button>
-        </div>
-      ) : (
-        <div className="mt-4 flex flex-col gap-3 rounded-xl border border-border-soft bg-sky-soft p-4 sm:flex-row sm:items-center">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title (optional)" className="inp flex-1" />
-          <input ref={fileRef} type="file" accept="video/*,.mp4,.webm,.ogg,.mov,.mkv" onChange={(e) => handleFile(e.target.files?.[0])} className="inp flex-1" disabled={uploading} />
-          <Button variant="secondary" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
-            {uploading ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
-            {uploading ? 'Uploading…' : 'Upload Video'}
-          </Button>
-        </div>
-      )}
+      <div className="mt-4 flex flex-col gap-3 rounded-xl border border-border-soft bg-sky-soft p-4 sm:flex-row sm:items-center">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="video/*,.mp4,.webm,.ogg,.mov,.mkv"
+          onChange={(e) => handleFile(e.target.files?.[0])}
+          className="sr-only"
+          disabled={uploading}
+        />
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Video title (optional)" className="inp flex-1" />
+        <Button variant="secondary" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
+          {uploading ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
+          {uploading ? 'Uploading…' : 'Upload Video'}
+        </Button>
+      </div>
       <p className="mt-2 text-xs text-slate-muted">Accepts MP4, WebM, OGG, MOV, MKV.</p>
       {err && (
         <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700">
@@ -518,15 +507,19 @@ function TraineesTable({ course }) {
   const { traineesForCourse } = useCourses()
   const navigate = useNavigate()
   const rows = traineesForCourse(course.id)
+  const completed = rows.filter((e) => e.status === 'completed').length
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4">
         <h4 className="flex items-center gap-2 font-semibold text-primary-deep"><Users size={17} className="text-primary" /> Enrolled Trainees</h4>
-        <Badge>{rows.length} enrolled</Badge>
+        <div className="flex items-center gap-2">
+          <Badge>{rows.length} enrolled</Badge>
+          <Badge tone="green">{completed} completed</Badge>
+        </div>
       </div>
       {rows.length ? (
         <div className="overflow-x-auto scroll-thin">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="w-full min-w-[780px] text-left text-sm">
             <thead>
               <tr className="border-y border-border-subtle bg-sky-soft text-xs uppercase tracking-wide text-slate-muted">
                 <th className="px-6 py-3 font-medium">Trainee</th>
@@ -534,19 +527,20 @@ function TraineesTable({ course }) {
                 <th className="px-4 py-3 font-medium">Stage</th>
                 <th className="px-4 py-3 font-medium">Score</th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Certificate</th>
                 <th className="px-4 py-3 text-right font-medium">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-subtle">
               {rows.map((t) => (
-                <tr key={t.id} className="group cursor-pointer transition-colors hover:bg-sky-soft/50" onClick={() => navigate(`/trainer/profile/${t.traineeId}`)}>
+                <tr key={`${t.courseId}:${t.traineeId || t.id || t.courseId}`} className="group cursor-pointer transition-colors hover:bg-sky-soft/50" onClick={() => navigate(`/trainer/profile/${t.traineeId}`)}>
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-3">
                       <span className="grid h-9 w-9 place-items-center rounded-lg bg-sky-light text-sm font-semibold text-primary">
-                        {String(t.traineeId).slice(-2).toUpperCase()}
+                        {(t.traineeName || t.traineeId || '—').slice(0, 2).toUpperCase()}
                       </span>
                       <div>
-                        <div className="font-semibold text-primary-deep">{t.traineeId}</div>
+                        <div className="font-semibold text-primary-deep">{t.traineeName || t.traineeId}</div>
                         <div className="text-xs text-slate-muted">{t.courseTitle || course.title}</div>
                       </div>
                     </div>
@@ -560,6 +554,32 @@ function TraineesTable({ course }) {
                   <td className="px-4 py-3 text-slate-body">{t.stage}</td>
                   <td className="px-4 py-3">{t.assessment?.percentage ?? '—'}</td>
                   <td className="px-4 py-3"><Badge tone={t.status === 'completed' ? 'green' : 'blue'}>{t.status === 'completed' ? 'Completed' : 'In Progress'}</Badge></td>
+                  <td className="px-4 py-3">
+                    {t.certificate ? (
+                      <div className="flex items-center gap-2">
+                        <Badge tone="green"><Award size={13} /> Issued</Badge>
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            exportCertificatePDF({
+                              traineeName: t.traineeName || t.traineeId || 'Trainee',
+                              courseName: course.title,
+                              completionDate: t.certificate.issuedOn,
+                              certId: t.certificate.id,
+                              trainer: course.trainer,
+                              score: t.assessment?.percentage || 82,
+                            })
+                          }}
+                        >
+                          <Download size={13} /> PDF
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-slate-muted">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <Button variant="subtle" onClick={(e) => { e.stopPropagation(); navigate(`/trainer/profile/${t.traineeId}`); }}>View Profile</Button>
                   </td>

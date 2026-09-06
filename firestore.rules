@@ -139,11 +139,12 @@ service cloud.firestore {
       allow read: if isTrainee()
         && resource.data.traineeId == request.auth.uid;
 
-      // Approved TRAINER can read enrollments for now.
-      //
-      // We will tighten this once we confirm the exact courseId /
-      // trainerId relationship used by the React application.
-      allow read: if isTrainer();
+      // Approved TRAINER (course owner) can read enrollments only for courses
+      // they own. Enrollment documents carry `trainerId` (the owning trainer's
+      // account id), so a trainer can never read another trainer's enrollment
+      // records or the certificates they carry.
+      allow read: if isTrainer()
+        && resource.data.trainerId == request.auth.uid;
 
       // Approved trainee can create an enrollment for themselves.
       allow create: if isTrainee()

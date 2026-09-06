@@ -1,8 +1,10 @@
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
+  Award,
   BookOpen,
   ClipboardList,
+  Download,
   Layers,
   Lock,
   Plus,
@@ -16,12 +18,13 @@ import { useTrainer } from '../../context/TrainerContext'
 import { useCourses } from '../../context/CourseContext'
 import { useBroadcasts } from '../../context/BroadcastContext'
 import { Card, Button, StatCard, Badge } from '../common/ui'
+import { exportCertificatePDF } from '../../utils/pdfExport'
 
 export default function TrainerHomeView() {
   const navigate = useNavigate()
   const { currentUser } = useAuth()
   const { analytics } = useTrainer()
-  const { myCourses } = useCourses()
+  const { myCourses, courseCertificates } = useCourses()
   const { broadcasts } = useBroadcasts()
 
   const isPending = currentUser?.status === 'pending'
@@ -133,6 +136,62 @@ export default function TrainerHomeView() {
           </div>
         ) : (
           <p className="mt-4 text-sm text-slate-muted">No courses yet. Create your first scientific course to get started.</p>
+        )}
+      </Card>
+
+      {/* Completed certificates across this trainer's courses */}
+      <Card className="p-6">
+        <div className="flex items-center justify-between">
+          <h3 className="flex items-center gap-2 font-semibold text-primary-deep">
+            <Award size={18} className="text-primary" /> Completed Certificates
+          </h3>
+          <Badge>{courseCertificates.length} issued</Badge>
+        </div>
+        {courseCertificates.length ? (
+          <div className="mt-4 overflow-x-auto scroll-thin">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead>
+                <tr className="border-y border-border-subtle bg-sky-soft text-xs uppercase tracking-wide text-slate-muted">
+                  <th className="px-4 py-2.5 font-medium">Trainee</th>
+                  <th className="px-4 py-2.5 font-medium">Course</th>
+                  <th className="px-4 py-2.5 font-medium">Score</th>
+                  <th className="px-4 py-2.5 font-medium">Issued</th>
+                  <th className="px-4 py-2.5 font-medium">Certificate ID</th>
+                  <th className="px-4 py-2.5 text-right font-medium">View / Download</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border-subtle">
+                {courseCertificates.slice(0, 8).map((c) => (
+                  <tr key={`${c.courseId}:${c.traineeId}`} className="hover:bg-sky-soft/50">
+                    <td className="px-4 py-3 font-medium text-primary-deep">{c.traineeName || c.traineeId}</td>
+                    <td className="px-4 py-3 text-slate-body">{c.courseTitle || c.courseId}</td>
+                    <td className="px-4 py-3">{c.assessment?.percentage ?? '—'}%</td>
+                    <td className="px-4 py-3 text-slate-body">{c.certificate?.issuedOn}</td>
+                    <td className="px-4 py-3 text-slate-muted">{c.certificate?.id}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() =>
+                          exportCertificatePDF({
+                            traineeName: c.traineeName || c.traineeId || 'Trainee',
+                            courseName: c.courseTitle || c.courseId,
+                            completionDate: c.certificate.issuedOn,
+                            certId: c.certificate.id,
+                            trainer: c.trainerName || myCourses.find((m) => m.id === c.courseId)?.trainer || '',
+                            score: c.assessment?.percentage || 82,
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-medium text-primary hover:bg-sky-light"
+                      >
+                        <Download size={14} /> PDF
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-slate-muted">No certificates issued yet. Completed trainees' certificates will appear here.</p>
         )}
       </Card>
 

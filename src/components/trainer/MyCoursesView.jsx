@@ -126,29 +126,40 @@ function CreateCourseModal({ open, onClose, onCreate, createCourse }) {
     objectives: '',
     syllabus: '',
   })
+  const [error, setError] = useState('')
+  const [creating, setCreating] = useState(false)
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
-  const submit = () => {
-    if (!form.title.trim()) return
-    const created = createCourse({
-      title: form.title.trim(),
-      description: form.description.trim(),
-      domain: form.domain,
-      subdomain: form.subdomain.trim(),
-      audience: form.audience.trim(),
-      difficulty: form.difficulty,
-      duration: form.duration,
-      tags: form.tags.split(',').map((s) => s.trim()).filter(Boolean),
-      // New courses always start as DRAFT; publishing runs through the validated
-      // publish flow which requires only the minimum course identity
-      // (title / description / domain). Learning material is added at the
-      // trainer's own pace and is never a hard publishing requirement.
-      status: 'draft',
-      objectives: form.objectives.split('\n').map((s) => s.trim()).filter(Boolean),
-      syllabus: form.syllabus.split('\n').map((s) => s.trim()).filter(Boolean),
-      prerequisites: form.prerequisites.split('\n').map((s) => s.trim()).filter(Boolean),
-    })
-    if (created) onCreate(created.id)
+  const submit = async () => {
+    if (!form.title.trim() || creating) return
+    setError('')
+    setCreating(true)
+    try {
+      const created = await createCourse({
+        title: form.title.trim(),
+        description: form.description.trim(),
+        domain: form.domain,
+        subdomain: form.subdomain.trim(),
+        audience: form.audience.trim(),
+        difficulty: form.difficulty,
+        duration: form.duration,
+        tags: form.tags.split(',').map((s) => s.trim()).filter(Boolean),
+        // New courses always start as DRAFT; publishing runs through the validated
+        // publish flow which requires only the minimum course identity
+        // (title / description / domain). Learning material is added at the
+        // trainer's own pace and is never a hard publishing requirement.
+        status: 'draft',
+        objectives: form.objectives.split('\n').map((s) => s.trim()).filter(Boolean),
+        syllabus: form.syllabus.split('\n').map((s) => s.trim()).filter(Boolean),
+        prerequisites: form.prerequisites.split('\n').map((s) => s.trim()).filter(Boolean),
+      })
+      if (created) onCreate(created.id)
+      else setError('Could not create the course. Please try again.')
+    } catch (e) {
+      setError(e?.message || 'Could not create the course. Please try again.')
+    } finally {
+      setCreating(false)
+    }
   }
 
   return (
@@ -224,9 +235,15 @@ function CreateCourseModal({ open, onClose, onCreate, createCourse }) {
           then publish it to the catalog. Only the title, description, and domain are required to publish.
         </p>
 
+        {error && (
+          <p className="rounded-xl bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700">{error}</p>
+        )}
+
         <div className="flex justify-end gap-2 border-t border-border-soft pt-4">
-          <Button variant="subtle" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit}>Create Course</Button>
+          <Button variant="subtle" onClick={onClose} disabled={creating}>Cancel</Button>
+          <Button onClick={submit} disabled={creating || !form.title.trim()}>
+            {creating ? 'Creating…' : 'Create Course'}
+          </Button>
         </div>
       </div>
       <style>{`.inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none}.inp:focus{border-color:#4E84B7;background:#fff}`}</style>

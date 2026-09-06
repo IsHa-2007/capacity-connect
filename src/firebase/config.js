@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore'
-import { getStorage } from 'firebase/storage'
 
 // Firebase configuration is NOT committed with real secrets.
 // Set these environment variables to connect CAPACITY CONNECT to a real
@@ -32,13 +31,12 @@ function initFirebase() {
   })
   const auth = getAuth(app)
   const db = getFirestore(app)
-  const storage = getStorage(app)
 
   if (import.meta.env.VITE_FIREBASE_USE_EMULATOR === 'true') {
     connectFirestoreEmulator(db, 'localhost', 8080)
   }
 
-  handle = { app, auth, db, storage }
+  handle = { app, auth, db }
   return handle
 }
 

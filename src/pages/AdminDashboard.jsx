@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import {
+  Award,
   BellRing,
   GitCompareArrows,
   LayoutDashboard,
@@ -17,11 +18,13 @@ import RegionalHeatmap from '../components/admin/RegionalHeatmap'
 import BroadcastCenter from '../components/admin/BroadcastCenter'
 import AdminUserManagement from '../components/admin/AdminUserManagement'
 import AdminProfileView from '../components/admin/AdminProfileView'
+import AdminCertificatesView from '../components/admin/AdminCertificatesView'
 
 const navItems = [
   { to: '/admin', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/admin/verification', label: 'Verification Queue', icon: ShieldCheck },
   { to: '/admin/users', label: 'User Management', icon: UsersRound },
+  { to: '/admin/certificates', label: 'Certificates', icon: Award },
   { to: '/admin/matcher', label: 'Trainer Matching', icon: GitCompareArrows },
   { to: '/admin/regions', label: 'Regional Heatmap', icon: Map },
   { to: '/admin/broadcast', label: 'Broadcast Center', icon: BellRing },
@@ -57,6 +60,7 @@ export default function AdminDashboard() {
               <Route path="verification" element={<VerificationQueue />} />
               <Route path="users" element={<AdminUserManagement />} />
               <Route path="profile/:uid" element={<AdminProfileView />} />
+              <Route path="certificates" element={<AdminCertificatesView />} />
               <Route path="matcher" element={<CompetencyMatcher />} />
               <Route path="regions" element={<RegionalHeatmap />} />
               <Route path="broadcast" element={<BroadcastCenter />} />

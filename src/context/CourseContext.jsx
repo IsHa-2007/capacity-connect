@@ -1,7 +1,8 @@
-import { createContext, useContext, useMemo, useState } from 'react'
-import { seedEnrollments, seedCompetencyRecords, stationRegionMap } from '../data/mockData'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { seedCompetencyRecords, stationRegionMap } from '../data/mockData'
 import { useAuth } from './AuthContext'
 import * as courseService from '../services/courseService'
+import { isFirebaseConfigured } from '../firebase/config'
 import { ownedTrainerIds } from '../utils/trainerOwnership'
 
 const CourseContext = createContext(null)
@@ -13,10 +14,52 @@ export function CourseProvider({ children }) {
   // Initialized from the service's (mock or Firestore) data source.
   const [courses, setCourses] = useState(() => seedCoursesSnapshot())
 
-  // User-scoped enrollments with traineeId + trainerId.
-  const [enrollments, setEnrollments] = useState(() =>
-    seedEnrollments.map((e) => ({ ...e })),
-  )
+  // When Firebase is configured, load the real course catalog from Firestore so
+  // React state reflects persisted documents (not just the seed data). This is
+  // what makes a Firestore-created course actually appear in My Courses and the
+  // trainee catalog after the create call resolves.
+  useEffect(() => {
+    if (!isFirebaseConfigured()) return
+    let active = true
+    courseService
+      .getAllCourses(currentUser)
+      .then((list) => {
+        if (active) setCourses(list)
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] Failed to load courses from Firestore:', err.message)
+      })
+    return () => {
+      active = false
+    }
+  }, [currentUser])
+
+  // User-scoped enrollments (traineeId + trainerId + courseId) which also carry
+  // the course certificate once a course is completed. Seeded from the service's
+  // (mock or Firestore-resolved) data source.
+  const [enrollments, setEnrollments] = useState(() => courseService._enrollmentsSeed())
+
+  // When Firebase is configured, load the real enrollment documents the current
+  // user is allowed to read (trainee → own; trainer → own courses; admin → all).
+  // Like the course catalog, this keeps React state in sync with Firestore so a
+  // certificate earned on one device is visible on the trainer/admin dashboards.
+  useEffect(() => {
+    if (!isFirebaseConfigured()) return
+    let active = true
+    courseService
+      .getEnrollments(currentUser)
+      .then((list) => {
+        if (active) setEnrollments(list)
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] Failed to load enrollments from Firestore:', err.message)
+      })
+    return () => {
+      active = false
+    }
+  }, [currentUser])
 
   // Competency records aggregated from completed courses for admin/regional data.
   const [competencyRecords, setCompetencyRecords] = useState(() =>
@@ -53,38 +96,40 @@ export function CourseProvider({ children }) {
     return enrollments.filter((e) => e.traineeId === currentUser.id)
   }, [enrollments, currentUser])
 
-  const enroll = (courseId) => {
+  const enroll = async (courseId) => {
     if (!currentUser || currentUser.role !== 'TRAINEE' || currentUser.status !== 'approved') return false
     const course = courseById(courseId)
     if (!course || (course.status !== 'published' && course.status !== 'featured')) return false
     if (getEnrollment(courseId)) return false
-    const next = [
-      ...enrollments,
-      {
-        id: `en${Date.now()}`,
-        traineeId: currentUser.id,
-        trainerId: course.trainerId,
+    try {
+      const created = await courseService.createEnrollment(currentUser, {
         courseId,
-        status: 'inprogress',
-        progress: 5,
-        stage: 'notes',
-        startedOn: new Date().toISOString().slice(0, 10),
-        notesDone: false,
-        slidesDone: false,
-        videoDone: false,
-        practiceDone: false,
-        assessment: null,
-        feedback: null,
-        certificate: null,
-        attempts: 0,
-      },
-    ]
-    setEnrollments(next)
-    return true
+        courseTitle: course.title,
+        trainerId: course.trainerId,
+      })
+      if (created) setEnrollments((prev) => {
+        const next = prev.filter((e) => !(e.courseId === courseId && e.traineeId === created.traineeId))
+        return [...next, created]
+      })
+      return !!created
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[CourseContext] enroll failed:', err.message)
+      return false
+    }
   }
 
   const updateEnrollment = (courseId, patch) => {
     if (!currentUser || currentUser.role !== 'TRAINEE' || currentUser.status !== 'approved') return
+    // Persist through the service (Firestore when configured) while mirroring
+    // into React state so the workspace updates live. Callers treat this as
+    // fire-and-forget; failures are logged, never surfaced mid-interaction.
+    courseService
+      .updateEnrollmentRecord(currentUser, courseId, patch)
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] updateEnrollment failed:', err.message)
+      })
     setEnrollments((prev) =>
       prev.map((e) =>
         e.courseId === courseId && e.traineeId === currentUser.id ? { ...e, ...patch } : e,
@@ -136,12 +181,46 @@ export function CourseProvider({ children }) {
   const traineesForCourse = (courseId) =>
     enrollments.filter((e) => e.courseId === courseId)
 
-  const createCourse = (data) =>
-    run(() => {
-      const created = courseService.createCourse(currentUser, data)
-      setCourses((prev) => [created, ...prev])
+  // ---- Certificates (role-scoped views over enrollments that carry one) ----
+  // A certificate exists exactly when an enrollment has `certificate` set and
+  // the enrollment is completed. These views enforce the ownership rules on top
+  // of whatever the service layer loaded, so:
+  //   - TRAINEE sees only their own certificates
+  //   - TRAINER sees only certificates for courses they own
+  //   - ADMIN sees every completed certificate
+  const myCertificates = useMemo(
+    () =>
+      enrollments.filter(
+        (e) => e.certificate && e.status === 'completed' && e.traineeId === (currentUser?.id || currentUser?.uid),
+      ),
+    [enrollments, currentUser],
+  )
+
+  const courseCertificates = useMemo(() => {
+    if (currentUser?.role !== 'TRAINER') return []
+    const owned = ownedTrainerIds(currentUser.id)
+    return enrollments.filter(
+      (e) => e.certificate && e.status === 'completed' && owned.has(e.trainerId),
+    )
+  }, [enrollments, currentUser])
+
+  const allCertificates = useMemo(
+    () => enrollments.filter((e) => e.certificate && e.status === 'completed'),
+    [enrollments],
+  )
+
+  const createCourse = async (data) => {
+    if (!currentUser) return null
+    try {
+      const created = await courseService.createCourse(currentUser, data)
+      if (created) setCourses((prev) => [created, ...prev])
       return created
-    })
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[CourseContext] createCourse failed:', err.message)
+      throw err
+    }
+  }
 
   const updateCourse = (id, patch) =>
     run(() => {
@@ -156,6 +235,7 @@ export function CourseProvider({ children }) {
       if (ok) {
         setCourses((prev) => prev.filter((c) => c.id !== id))
         setEnrollments((prev) => prev.filter((e) => e.courseId !== id))
+        courseService.removeCourseEnrollments(id)
       }
       return ok
     })
@@ -282,6 +362,10 @@ export function CourseProvider({ children }) {
       enroll,
       updateEnrollment,
       recordCompetency,
+      // certificates
+      myCertificates,
+      courseCertificates,
+      allCertificates,
       // trainer
       myCourses,
       traineesForCourse,

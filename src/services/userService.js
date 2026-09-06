@@ -20,8 +20,8 @@ import {
   getDocs,
   serverTimestamp,
 } from 'firebase/firestore'
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { isFirebaseConfigured, getFirebase } from '../firebase/config'
+import { uploadToCloudinary, isCloudinaryConfigured, validateImageFile } from './cloudinaryService'
 import { users as seedUsers } from '../data/mockData'
 
 // ---------------------------------------------------------------------------
@@ -267,10 +267,11 @@ export async function removeCertification(uid, certificationId) {
 // ---------------------------------------------------------------------------
 // FILE UPLOAD ARCHITECTURE
 // ---------------------------------------------------------------------------
-// Production: files go to Firebase Storage; only the download URL / metadata is
-// written to Firestore. Without credentials we produce a temporary in-memory
-// object URL for the current page session only — it is never persisted to
-// localStorage and does not pretend to be permanent storage.
+// Production: files go to Cloudinary (NOT Firebase Storage); only the Cloudinary
+// URL / public_id / metadata is written to Firestore. When Cloudinary is not
+// configured we produce a temporary in-memory object URL for the current page
+// session only — it is never persisted to localStorage and does not pretend to
+// be permanent storage.
 
 const MOCK_BLOB_URLS = new Map()
 
@@ -283,41 +284,56 @@ function blobUrlFor(file) {
   return url
 }
 
+function extOf(name = '') {
+  const parts = String(name).split('.')
+  const ext = parts.length > 1 ? parts.pop().toLowerCase() : 'bin'
+  return /^[a-z0-9]{1,8}$/i.test(ext) ? ext : 'bin'
+}
+
 export async function uploadProfilePhoto(uid, file) {
   if (!file) return getUserProfile(uid)
-  if (isFirebaseConfigured()) {
-    const { storage } = getFirebase()
-    const fullRef = ref(storage, `profiles/${uid}/photo.${extOf(file.name)}`)
-    await uploadBytes(fullRef, file)
-    const photoURL = await getDownloadURL(fullRef)
-    return updateUserProfile(uid, { photoURL })
+  const imageErr = validateImageFile(file)
+  if (imageErr) throw new Error(imageErr)
+  let photoURL
+  let publicId = ''
+  if (isCloudinaryConfigured()) {
+    const result = await uploadToCloudinary(file, {
+      folder: `profiles/${uid}`,
+      publicId: `photo.${extOf(file.name)}`,
+      resourceType: 'image',
+      metadata: { uploadedBy: uid, purpose: 'profile-photo' },
+    })
+    photoURL = result.fileURL
+    publicId = result.public_id
+  } else {
+    // MOCK / DEVELOPMENT ONLY — temporary in-memory preview, never persisted.
+    photoURL = blobUrlFor(file)
+    publicId = ''
   }
-  // MOCK / DEVELOPMENT ONLY — temporary in-memory preview, never persisted.
-  const photoURL = blobUrlFor(file)
-  await updateUserProfile(uid, { photoURL })
+  await updateUserProfile(uid, { photoURL, photoPublicId: publicId })
   return getUserProfile(uid)
 }
 
 export async function uploadCertificationFile(uid, certificationId, file) {
   if (!file) return getUserProfile(uid)
   const type = file.type || extOf(file.name)
-  if (isFirebaseConfigured()) {
-    const { storage } = getFirebase()
-    const fullRef = ref(storage, `profiles/${uid}/certifications/${certificationId}.${extOf(file.name)}`)
-    await uploadBytes(fullRef, file)
-    const fileURL = await getDownloadURL(fullRef)
-    return updateCertification(uid, certificationId, { fileURL, fileType: type })
+  let fileURL
+  let publicId = ''
+  if (isCloudinaryConfigured()) {
+    const result = await uploadToCloudinary(file, {
+      folder: `profiles/${uid}/certifications`,
+      publicId: `${certificationId}.${extOf(file.name)}`,
+      metadata: { uploadedBy: uid, certificationId, purpose: 'certification' },
+    })
+    fileURL = result.fileURL
+    publicId = result.public_id
+  } else {
+    // MOCK / DEVELOPMENT ONLY — temporary in-memory object URL, never persisted.
+    fileURL = blobUrlFor(file)
+    publicId = ''
   }
-  // MOCK / DEVELOPMENT ONLY — temporary in-memory object URL, never persisted.
-  const fileURL = blobUrlFor(file)
-  await updateCertification(uid, certificationId, { fileURL, fileType: type })
+  await updateCertification(uid, certificationId, { fileURL, fileType: type, publicId })
   return getUserProfile(uid)
-}
-
-function extOf(name = '') {
-  const parts = String(name).split('.')
-  const ext = parts.length > 1 ? parts.pop().toLowerCase() : 'bin'
-  return /^[a-z0-9]{1,8}$/i.test(ext) ? ext : 'bin'
 }
 
 export async function getPendingUsers() {

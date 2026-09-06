@@ -5,8 +5,8 @@
 //
 // Architecture mirrors userService.js:
 //   - When Firebase is configured, courses persist to Firestore 'courses' and
-//     files to Firebase Storage. In that (rare) case the functions return
-//     Promises.
+//     file blobs upload to Cloudinary (NOT Firebase Storage). In that (rare)
+//     case the functions return Promises.
 //   - When Firebase is NOT configured, we fall back to an isolated in-memory
 //     mock store so the platform remains runnable in development. These mock
 //     operations are SYNCHRONOUS and return the resulting object directly so
@@ -14,10 +14,16 @@
 //     only, does NOT use localStorage, and is never advertised as production
 //     persistence.
 
-import { doc, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
+import { collection, doc, getDocs, query, where, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { isFirebaseConfigured, getFirebase } from '../firebase/config'
-import { courses as seedCourses } from '../data/mockData'
+import {
+  uploadToCloudinary,
+  deleteFromCloudinary,
+  courseFolderError,
+  isCloudinaryConfigured,
+} from './cloudinaryService'
+import { courses as seedCourses, seedEnrollments } from '../data/mockData'
+import { ownedTrainerIds } from '../utils/trainerOwnership'
 
 // ---------------------------------------------------------------------------
 // ACCESS CONTROL
@@ -42,6 +48,13 @@ function assertCanManage(actor, course) {
 // MOCK / DEVELOPMENT-ONLY store
 // ---------------------------------------------------------------------------
 function cloneSeed(c) {
+  // Prefer the content.<section> map when present (Firestore write shape used by
+  // addContentItem/updateContentItem) so reloaded courses keep their material;
+  // fall back to the legacy top-level arrays used by the seed/mock data.
+  const pick = (key) => {
+    const fromContent = c.content?.[key]
+    return Array.isArray(fromContent) ? fromContent : Array.isArray(c[key]) ? c[key] : []
+  }
   return {
     ...c,
     objectives: Array.isArray(c.objectives) ? [...c.objectives] : [],
@@ -49,10 +62,10 @@ function cloneSeed(c) {
     tags: Array.isArray(c.tags) ? [...c.tags] : [],
     prerequisites: Array.isArray(c.prerequisites) ? [...c.prerequisites] : [],
     bank: Array.isArray(c.bank) ? c.bank.map((q) => ({ ...q, tag: q.tag ? { ...q.tag } : q.tag })) : [],
-    notes: Array.isArray(c.notes ?? c.content?.notes) ? (c.notes ?? c.content.notes).map((x) => ({ ...x })) : [],
-    slides: Array.isArray(c.slides ?? c.content?.slides) ? (c.slides ?? c.content.slides).map((x) => ({ ...x })) : [],
-    videos: Array.isArray(c.videos ?? c.content?.videos) ? (c.videos ?? c.content.videos).map((x) => ({ ...x })) : [],
-    practice: Array.isArray(c.practice ?? c.content?.practice) ? (c.practice ?? c.content.practice).map((x) => ({ ...x })) : [],
+    notes: pick('notes').map((x) => ({ ...x })),
+    slides: pick('slides').map((x) => ({ ...x })),
+    videos: pick('videos').map((x) => ({ ...x })),
+    practice: pick('practice').map((x) => ({ ...x })),
   }
 }
 
@@ -71,10 +84,10 @@ export function _mockSeed() {
 // ---------------------------------------------------------------------------
 // FILE UPLOAD ARCHITECTURE
 // ---------------------------------------------------------------------------
-// Production: files go to Firebase Storage under courses/{courseId}/{folder}/...
-// Only the download URL / storage path / metadata is written to the course
-// record. Without credentials we produce a temporary in-memory object URL for
-// the current page session only (never persisted, never localStorage).
+// Production: files are uploaded to Cloudinary (NOT Firebase Storage). Only the
+// Cloudinary URL / public_id / metadata is written to the course record. Without
+// Cloudinary credentials we produce a temporary in-memory object URL for the
+// current page session only (never persisted, never localStorage).
 const MOCK_BLOB_URLS = new Map()
 
 function blobUrlFor(file) {
@@ -93,43 +106,12 @@ function extOf(name = '') {
   return /^[a-z0-9]{1,8}$/i.test(ext) ? ext : 'bin'
 }
 
-// Per-folder allowed formats (extension + MIME). Used to validate uploads so the
-// app never relies only on the HTML `accept` attribute.
-const FOLDER_FORMATS = {
-  notes: {
-    exts: ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'],
-    mime: (m) => m.includes('pdf') || m.startsWith('image/'),
-  },
-  slides: {
-    exts: ['ppt', 'pptx'],
-    mime: (m) => m.includes('presentation') || m.includes('powerpoint'),
-  },
-  videos: {
-    exts: ['mp4', 'webm', 'ogg', 'ogv', 'mov', 'mkv'],
-    mime: (m) => m.startsWith('video/'),
-  },
-  practice: {
-    exts: ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'doc', 'docx', 'txt'],
-    mime: (m) => m.includes('pdf') || m.startsWith('image/') || m.includes('word') || m.includes('text') || m.includes('document'),
-  },
-}
-
 // Validate a file against the allowed formats for a course folder. Returns an
-// error message string, or null when the file is allowed.
+// error message string, or null when the file is allowed. Single source of truth
+// lives in cloudinaryService.courseFolderError; this re-export keeps the existing
+// UI import working without duplicating the format rules.
 export function forFolderError(folder, file) {
-  if (!file) return null
-  const rule = FOLDER_FORMATS[folder] || FOLDER_FORMATS.notes
-  const ext = extOf(file.name)
-  const mime = String(file.type || '').toLowerCase()
-  const extOk = rule.exts.includes(ext)
-  const mimeOk = rule.mime ? rule.mime(mime) : true
-  if (extOk || mimeOk) return null
-  const allowed = rule.exts.map((e) => e.toUpperCase()).join(', ')
-  return `Unsupported file type. ${folderDisplay(folder)} accepts: ${allowed}.`
-}
-
-function folderDisplay(folder) {
-  return { notes: 'Study Notes', slides: 'Slide Decks', videos: 'Video Lectures', practice: 'Practice Material' }[folder] || folder
+  return courseFolderError(folder, file)
 }
 
 function safeToken(seed) {
@@ -137,21 +119,38 @@ function safeToken(seed) {
 }
 
 // Upload a file for a course content item. `folder` is one of notes/slides/
-// videos/practice. Returns { fileURL, fileType, storagePath }.
+// videos/practice. Returns { fileURL, fileType, storagePath } where storagePath
+// is the Cloudinary public_id (used for cleanup tracking).
 export async function uploadCourseFile(actor, courseId, folder, file) {
   if (!file) return null
   const course = mockGet(courseId)
   assertCanManage(actor, course)
-  const err = forFolderError(folder, file)
+  const err = courseFolderError(folder, file)
   if (err) throw new Error(err)
   const ext = extOf(file.name)
 
-  if (isFirebaseConfigured()) {
-    const { storage } = getFirebase()
-    const fileRef = ref(storage, `courses/${courseId}/${folder}/${safeToken(file.name)}.${ext}`)
-    await uploadBytes(fileRef, file)
-    const fileURL = await getDownloadURL(fileRef)
-    return { fileURL, fileType: file.type || ext, storagePath: fileRef.fullPath }
+  if (isCloudinaryConfigured()) {
+    const result = await uploadToCloudinary(file, {
+      // Namespace by courseId + folder so Course A files never collide with
+      // Course B files, and they remain grouped in the Cloudinary media library.
+      //
+      // Cloudinary CONCATENATES `folder` + `public_id` into the final asset
+      // public_id, so public_id MUST be the plain file name — never repeat the
+      // folder segment here. Repeating it (e.g. publicId `notes/xx.pdf` with
+      // folder `.../notes`) produces broken double paths like
+      // `courses/<id>/notes/notes/xx.pdf` and corrupts every stored file URL.
+      folder: `courses/${courseId}/${folder}`,
+      publicId: `${safeToken('m')}.${ext}`,
+      metadata: { courseId, uploadedBy: actor.id || actor.uid, folder },
+    })
+    return {
+      fileURL: result.fileURL,
+      fileType: result.fileType || file.type || ext,
+      storagePath: result.storagePath || result.public_id,
+      publicId: result.public_id,
+      format: result.format,
+      size: result.bytes,
+    }
   }
 
   // MOCK / DEVELOPMENT ONLY — temporary in-memory object URL, session-only.
@@ -160,14 +159,11 @@ export async function uploadCourseFile(actor, courseId, folder, file) {
 }
 
 // Remove the stored object (best-effort) when removing a material.
+// Cloudinary unsigned uploads cannot be destroyed from the browser without the
+// API secret; we track the public_id so a backend/Console routine can clean up.
 export function removeStoredFile(storagePath) {
-  if (!storagePath || !isFirebaseConfigured() || storagePath.startsWith('mock:')) return
-  try {
-    const { storage } = getFirebase()
-    void deleteObject(ref(storage, storagePath))
-  } catch {
-    /* best-effort cleanup */
-  }
+  if (!storagePath || storagePath.startsWith('mock:')) return
+  void deleteFromCloudinary(storagePath)
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +237,41 @@ async function createCourseFirestore(actor, data) {
     publishedAt: status === 'published' ? now : null,
   }
   await setDoc(doc(db, 'courses', id), course)
-  return { ...course, content: { notes: [], slides: [], videos: [], practice: [] } }
+  // Keep the local reactive store in sync so subsequent in-session content /
+  // question-bank operations on this course work exactly like the mock path.
+  const local = { ...course, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), publishedAt: status === 'published' ? new Date().toISOString() : null }
+  MOCK_COURSES.set(id, cloneSeed(local))
+  return mockGet(id)
+}
+
+// Load the course catalog from Firestore when Firebase is configured. Also
+// hydrates the in-memory store so the mock paths (mockGet, canManageCourse,
+// content/question-bank ops) operate on the real persisted documents rather
+// than only the seed data. Falls back to the seed catalog when not configured.
+export async function getAllCourses(actor) {
+  if (!isFirebaseConfigured()) return _mockSeed()
+  const { db } = getFirebase()
+  const isTrainee = actor?.role === 'TRAINEE'
+  // TRAINEE accounts are permitted (by firestore.rules) to read only docs whose
+  // status is 'published', so scope the query exactly to that status to avoid
+  // a permission-denied failure of the whole catalog read.
+  const ref = isTrainee
+    ? query(collection(db, 'courses'), where('status', '==', 'published'))
+    : collection(db, 'courses')
+  const snap = await getDocs(ref)
+  // Firestore stores createdAt/publishedAt (and updatedAt set with
+  // serverTimestamp) as Timestamp objects; normalize to ISO strings so the app
+  // code sees the same date type as the mock path.
+  const toIso = (t) => (t && typeof t.toDate === 'function' ? t.toDate().toISOString() : t || null)
+  const list = snap.docs.map((d) => {
+    const c = cloneSeed({ ...d.data(), id: d.id })
+    c.createdAt = toIso(c.createdAt)
+    c.updatedAt = toIso(c.updatedAt)
+    c.publishedAt = toIso(c.publishedAt)
+    MOCK_COURSES.set(c.id, c)
+    return c
+  })
+  return list
 }
 
 export function updateCourse(actor, courseId, patch) {
@@ -312,7 +342,15 @@ export function addContentItem(actor, courseId, section, item) {
   const course = mockGet(courseId)
   assertCanManage(actor, course)
   const content = contentOf(course)
-  const entry = { id: `m${safeToken('m')}`, ...item, section }
+  const entry = {
+    id: `m${safeToken('m')}`,
+    ...item,
+    section,
+    // Prefer an explicit publicId; otherwise derive from storagePath (the
+    // Cloudinary public_id returned by uploadCourseFile) so Firestore metadata
+    // always carries a publicId usable for later cleanup.
+    publicId: item.publicId || (typeof item.storagePath === 'string' && !item.storagePath.startsWith('mock:') ? item.storagePath : ''),
+  }
   const next = { ...content, [section]: [...(content[section] || []), entry] }
   const updated = applyContent(course, next)
   if (isFirebaseConfigured()) {
@@ -484,4 +522,169 @@ export function courseReadiness(course) {
     )
   }
   return { ok: errors.length === 0, errors, warnings }
+}
+
+// ---------------------------------------------------------------------------
+// ENROLLMENTS & CERTIFICATES
+// ---------------------------------------------------------------------------
+// Trainee enrollments carry the course certificate inside the SAME document
+// (fields: traineeId, trainerId, courseId, status, assessment, feedback,
+// certificate). A completed certificate exists exactly when `certificate` is set
+// and `status === 'completed'`. Keeping certificates on the enrollment (rather
+// than a separate collection) avoids a parallel certificate system and lets the
+// access rules reuse the project's existing enrollment ownership fields.
+//
+// Access model (mirrored in firestore.rules):
+//   - TRAINEE reads/writes ONLY their own enrollments (traineeId == auth.uid)
+//   - TRAINER reads ONLY enrollments whose trainerId == auth.uid (course owner)
+//   - ADMIN reads ALL enrollments (and therefore all certificates)
+
+const MOCK_ENROLLMENTS = new Map(
+  seedEnrollments.map((e) => [`${e.courseId}:${e.traineeId}`, cloneEnrollment(e)]),
+)
+
+function cloneEnrollment(e) {
+  return {
+    ...e,
+    assessment: e.assessment ? { ...e.assessment } : null,
+    feedback: e.feedback ? { ...e.feedback } : null,
+    certificate: e.certificate ? { ...e.certificate } : null,
+  }
+}
+
+// Synchronous snapshot of the current in-memory enrollment catalog for seeding
+// the reactive store in CourseContext. READ-ONLY — do not mutate outside the
+// service. (Development-only when Firebase is not configured.)
+export function _enrollmentsSeed() {
+  return [...MOCK_ENROLLMENTS.values()].map((e) => cloneEnrollment(e))
+}
+
+function enrollmentKey(courseId, traineeId) {
+  return `${courseId}:${traineeId}`
+}
+
+function assertTrainee(actor) {
+  if (!actor || actor.role !== 'TRAINEE' || (actor.status !== 'approved' && actor.approvalStatus !== 'APPROVED')) {
+    throw new Error('Unauthorized: only an approved Trainee may manage their own enrollments.')
+  }
+}
+
+// Load enrollments scoped to the caller, exactly as firestore.rules permits:
+// trainee → own records only; trainer → records for courses they own; admin →
+// all records. When Firebase is not configured, falls back to the in-memory
+// store. Also hydrates the in-memory map so mock helpers stay consistent.
+export async function getEnrollments(actor) {
+  if (isFirebaseConfigured()) {
+    const { db } = getFirebase()
+    const uid = actor?.id || actor?.uid
+    let ref
+    if (actor?.role === 'TRAINEE') {
+      ref = query(collection(db, 'enrollments'), where('traineeId', '==', uid))
+    } else if (actor?.role === 'TRAINER') {
+      // Trainer (course owner) reads only enrollments on courses they own.
+      ref = query(collection(db, 'enrollments'), where('trainerId', '==', uid))
+    } else {
+      // ADMIN: all completed/in-progress enrollments across all courses.
+      ref = collection(db, 'enrollments')
+    }
+    const snap = await getDocs(ref)
+    return snap.docs.map((d) => {
+      const e = cloneEnrollment({ ...d.data(), id: d.id })
+      MOCK_ENROLLMENTS.set(enrollmentKey(e.courseId, e.traineeId), cloneEnrollment(e))
+      return cloneEnrollment(e)
+    })
+  }
+
+  const all = [...MOCK_ENROLLMENTS.values()]
+  if (!actor) return all.map((e) => cloneEnrollment(e))
+  const uid = actor.id || actor.uid
+  if (actor.role === 'TRAINEE') return all.filter((e) => e.traineeId === uid).map((e) => cloneEnrollment(e))
+  if (actor.role === 'TRAINER') {
+    const owned = ownedTrainerIds(uid)
+    return all.filter((e) => owned.has(e.trainerId)).map((e) => cloneEnrollment(e))
+  }
+  return all.map((e) => cloneEnrollment(e))
+}
+
+// Create an enrollment for the current trainee. Persists to Firestore when
+// configured, otherwise to the in-memory store. Returns the created enrollment
+// (with an id) so the UI can render immediately.
+export async function createEnrollment(actor, data) {
+  assertTrainee(actor)
+  const now = new Date().toISOString()
+  const enrollment = {
+    id: data.id || `en${safeToken('enr')}`,
+    traineeId: actor.id || actor.uid,
+    traineeName: actor.name || actor.fullName || '',
+    courseId: data.courseId,
+    courseTitle: data.courseTitle || '',
+    trainerId: data.trainerId,
+    status: 'inprogress',
+    progress: 5,
+    stage: 'notes',
+    startedOn: now.slice(0, 10),
+    notesDone: false,
+    slidesDone: false,
+    videoDone: false,
+    practiceDone: false,
+    assessment: null,
+    feedback: null,
+    certificate: null,
+    attempts: 0,
+  }
+  MOCK_ENROLLMENTS.set(enrollmentKey(enrollment.courseId, enrollment.traineeId), cloneEnrollment(enrollment))
+  if (isFirebaseConfigured()) {
+    const { db } = getFirebase()
+    await setDoc(doc(db, 'enrollments', enrollment.id), enrollment)
+  }
+  return cloneEnrollment(enrollment)
+}
+
+// Merge a patch into the caller's own enrollment (progress, assessment,
+// feedback, certificate, status). Identity fields (traineeId/trainerId/courseId)
+// are preserved and can never be changed through this function, matching the
+// firestore.rules constraints for trainee updates.
+export async function updateEnrollmentRecord(actor, courseId, patch) {
+  assertTrainee(actor)
+  const uid = actor.id || actor.uid
+  const current = MOCK_ENROLLMENTS.get(enrollmentKey(courseId, uid)) || (await mockEnrollmentFromFirestore(courseId, uid))
+  if (!current) throw new Error('Enrollment not found.')
+  const next = cloneEnrollment({
+    ...current,
+    ...patch,
+    traineeId: current.traineeId,
+    trainerId: current.trainerId,
+    courseId: current.courseId,
+  })
+  MOCK_ENROLLMENTS.set(enrollmentKey(courseId, uid), next)
+  if (isFirebaseConfigured()) {
+    const { db } = getFirebase()
+    await updateDoc(doc(db, 'enrollments', current.id), { ...patch, updatedAt: serverTimestamp() })
+  }
+  return next
+}
+
+async function mockEnrollmentFromFirestore(courseId, uid) {
+  if (!isFirebaseConfigured()) return null
+  const { db } = getFirebase()
+  // Single-field query (no composite index needed); the course filter happens
+  // client-side on the caller's own records only. Rules samples each returned
+  // doc, so never query with courseId alone (that would include other trainees'
+  // docs and be denied).
+  const q = query(collection(db, 'enrollments'), where('traineeId', '==', uid))
+  const snap = await getDocs(q)
+  const doc = snap.docs.find((d) => d.data().courseId === courseId)
+  if (!doc) return null
+  const e = cloneEnrollment({ ...doc.data(), id: doc.id })
+  MOCK_ENROLLMENTS.set(enrollmentKey(courseId, uid), e)
+  return e
+}
+
+// Prune in-memory enrollments when a course is deleted. Firestore enrollment
+// deletes are intentionally NOT issued from the client because firestore.rules
+// denies trainer-side deletion of enrollment documents (admin-only).
+export function removeCourseEnrollments(courseId) {
+  for (const key of [...MOCK_ENROLLMENTS.keys()]) {
+    if (key.startsWith(`${courseId}:`)) MOCK_ENROLLMENTS.delete(key)
+  }
 }

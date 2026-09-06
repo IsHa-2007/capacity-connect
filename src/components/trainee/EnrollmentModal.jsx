@@ -43,8 +43,8 @@ export default function EnrollmentModal({ course, open, onClose }) {
   const isPending = currentUser?.status === 'pending'
   const isPublic = !currentUser
 
-  const handleConfirm = () => {
-    const fresh = enroll(course.id)
+  const handleConfirm = async () => {
+    const fresh = await enroll(course.id)
     if (fresh) {
       onClose()
       navigate(`/trainee/workspace/${course.id}`, { state: { justEnrolled: true } })
