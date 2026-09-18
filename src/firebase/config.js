@@ -1,11 +1,15 @@
 import { initializeApp } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore'
 
 // Firebase configuration is NOT committed with real secrets.
 // Set these environment variables to connect CAPACITY CONNECT to a real
 // Firebase project (see .env.example). Until then this module stays inert so
 // the rest of the app falls back to the isolated development mock store.
+//
+// NOTE: Firebase Auth is no longer part of the authentication flow (the
+// Node.js/Express backend owns authentication through Supabase Auth). This
+// module now only initializes Firestore, which still holds user profile / course
+// data until the data migration modules land.
 const apiKey = import.meta.env.VITE_FIREBASE_API_KEY
 const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN
 const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID
@@ -29,14 +33,13 @@ function initFirebase() {
     messagingSenderId,
     appId,
   })
-  const auth = getAuth(app)
   const db = getFirestore(app)
 
   if (import.meta.env.VITE_FIREBASE_USE_EMULATOR === 'true') {
     connectFirestoreEmulator(db, 'localhost', 8080)
   }
 
-  handle = { app, auth, db }
+  handle = { app, db }
   return handle
 }
 
@@ -45,7 +48,7 @@ export function isFirebaseConfigured() {
   return configured
 }
 
-// Returns { app, auth, db } when configured, otherwise null.
+// Returns { app, db } when configured, otherwise null.
 export function getFirebase() {
   return initFirebase()
 }

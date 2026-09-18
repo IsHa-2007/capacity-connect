@@ -3,7 +3,6 @@ import { Camera, Save, X } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { Button, Modal } from '../common/ui'
 import { STATIONS, EXPERTISE_OPTIONS, SPECIALIZATION_MAP } from '../../data/mockData'
-import { uploadProfilePhoto } from '../../services/userService'
 import { regionFor } from '../../services/userService'
 
 const SKILL_OPTIONS = [
@@ -27,7 +26,7 @@ const SKILL_OPTIONS = [
  * Never allows modifying role / approvalStatus / uid / auth email.
  */
 export default function ProfileEditor({ open, onClose }) {
-  const { currentUser, updateProfile, refreshUserProfile } = useAuth()
+  const { currentUser, updateProfile, refreshUserProfile, updateProfilePhoto } = useAuth()
 
   const [fields, setFields] = useState(() => snapshot(currentUser, false))
   const [busy, setBusy] = useState(false)
@@ -45,7 +44,6 @@ export default function ProfileEditor({ open, onClose }) {
 
   if (!open || !currentUser) return null
 
-  const uid = currentUser.uid
   const set = (k) => (e) => setFields((f) => ({ ...f, [k]: e.target.value }))
 
   const addTextItem = (k) => {
@@ -73,7 +71,9 @@ export default function ProfileEditor({ open, onClose }) {
     setError('')
     setBusy(true)
     try {
-      const updated = await uploadProfilePhoto(uid, file)
+      // Real users: Cloudinary + backend public.users reference; dev mock users:
+      // existing in-memory object-URL preview. Both return the refreshed profile.
+      const updated = await updateProfilePhoto(file)
       if (updated) setFields(snapshot(updated, false))
       await refreshUserProfile()
     } catch {

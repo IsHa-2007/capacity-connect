@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { CloudSun, Lock, Mail, MapPin, ShieldCheck, UserRound } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { DOMAINS, STATIONS } from '../data/mockData'
+import { STATIONS, EXPERTISE_OPTIONS } from '../data/mockData'
 
 export default function AuthPage() {
   const { login, register } = useAuth()
@@ -16,13 +16,16 @@ export default function AuthPage() {
     email: '',
     password: '',
     name: '',
-    role: 'TRAINEE',
     department: '',
     empId: '',
     station: STATIONS[0],
     title: '',
+    role: 'TRAINEE',
     expertise: '',
     experience: '',
+    professionalSummary: '',
+    qualifications: '',
+    trainingInterests: '',
   })
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
@@ -32,6 +35,13 @@ export default function AuthPage() {
     setError('')
     setFlash('')
   }
+
+  // Split a comma-separated string into a trimmed, non-empty list.
+  const toList = (value) =>
+    String(value || '')
+      .split(/[,;]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -46,13 +56,21 @@ export default function AuthPage() {
       // Pending Approval screen; approved users go to their dashboard.
       navigate('/home')
     } else {
-      const res = await register({ ...form })
+      const res = await register({
+        ...form,
+        // Canonical API field. The local form field is `name`; send `fullName`
+        // explicitly so the wire payload always matches the backend contract.
+        fullName: form.name,
+        qualifications: toList(form.qualifications),
+        trainingInterests: toList(form.trainingInterests),
+        expertise: form.expertise || undefined,
+      })
       if (!res.ok) {
         setError(res.error)
         return
       }
-      // Public registration is strictly Trainee/Trainer and always starts as
-      // PENDING. Admins are never created through this form.
+      // Public registration may REQUEST a TRAINEE or TRAINER account, but NEVER
+      // ADMIN. Both roles are created PENDING and verified by an administrator.
       setFlash('Registration successful. Your account is pending verification. Please wait for administrative approval.')
       setMode('login')
     }
@@ -134,15 +152,39 @@ export default function AuthPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === 'register' && (
               <>
+                {/* Account type: TRAINEE or TRAINER only. ADMIN is never
+                    selectable — it is provisioned server-side (see footer). */}
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-primary-deep">I am registering as</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['TRAINEE', 'TRAINER'].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, role: r }))}
+                        className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors ${
+                          form.role === r
+                            ? 'border-primary bg-primary text-white shadow-[0_2px_6px_rgba(31,95,147,0.25)]'
+                            : 'border-border-soft bg-white text-slate-body hover:bg-sky-light'
+                        }`}
+                      >
+                        {r === 'TRAINEE' ? 'Trainee (learner)' : 'Trainer (expert)'}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-muted">
+                    {form.role === 'TRAINER'
+                      ? 'Trainer accounts require the professional details below for administrator review.'
+                      : 'Trainees sign up with their official ID and station.'}
+                  </p>
+                </div>
+
                 <div className="relative">
                   <UserRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-muted" size={16} />
                   <input required value={form.name} onChange={set('name')} placeholder="Full name" className={inputCls} />
                 </div>
+
                 <div className="grid grid-cols-2 gap-3">
-                  <select value={form.role} onChange={set('role')} className="w-full rounded-lg border border-border-soft bg-sky-soft py-2.5 px-3 text-sm text-slate-deep outline-none focus:border-secondary">
-                    <option value="TRAINEE">Trainee</option>
-                    <option value="TRAINER">Trainer</option>
-                  </select>
                   <div className="relative">
                     <MapPin className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-muted" size={16} />
                     <select value={form.station} onChange={set('station')} className="w-full rounded-lg border border-border-soft bg-sky-soft py-2.5 pl-9 pr-3 text-sm text-slate-deep outline-none focus:border-secondary">
@@ -151,25 +193,42 @@ export default function AuthPage() {
                       ))}
                     </select>
                   </div>
-                </div>
-                <div className="relative">
-                  <input required value={form.empId} onChange={set('empId')} placeholder="Government / Department ID (e.g. IMD-FC-0001)" className={inputCls} />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-muted">ID</span>
+                  <div className="relative">
+                    <input required value={form.empId} onChange={set('empId')} placeholder="Government / Department ID (e.g. IMD-FC-0001)" className={inputCls} />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-muted">ID</span>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <input value={form.department} onChange={set('department')} placeholder="Department" className="w-full rounded-lg border border-border-soft bg-sky-soft py-2.5 px-3 text-sm outline-none focus:border-secondary" />
                   <input value={form.title} onChange={set('title')} placeholder="Designation" className="w-full rounded-lg border border-border-soft bg-sky-soft py-2.5 px-3 text-sm outline-none focus:border-secondary" />
                 </div>
+
                 {form.role === 'TRAINER' && (
-                  <>
-                    <select value={form.expertise} onChange={set('expertise')} className="w-full rounded-lg border border-border-soft bg-sky-soft py-2.5 px-3 text-sm outline-none focus:border-secondary">
-                      <option value="">Select domain expertise</option>
-                      {DOMAINS.map((d) => (
-                        <option key={d}>{d}</option>
-                      ))}
-                    </select>
-                    <input value={form.experience} onChange={set('experience')} placeholder="Years of experience" className="w-full rounded-lg border border-border-soft bg-sky-soft py-2.5 px-3 text-sm outline-none focus:border-secondary" />
-                  </>
+                  <div className="space-y-3 rounded-xl border border-blue-100 bg-sky-light/60 p-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-primary-deep">Domain expertise</label>
+                        <select value={form.expertise} onChange={set('expertise')} className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm outline-none focus:border-secondary">
+                          <option value="">Select…</option>
+                          {EXPERTISE_OPTIONS.map((o) => (
+                            <option key={o} value={o}>{o}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-primary-deep">Years of experience</label>
+                        <input value={form.experience} onChange={set('experience')} type="number" min="0" placeholder="e.g. 10" className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm outline-none focus:border-secondary" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-primary-deep">Professional summary</label>
+                      <textarea value={form.professionalSummary} onChange={set('professionalSummary')} rows={2} placeholder="Brief summary of your expertise and training experience" className="w-full resize-none rounded-lg border border-border-soft bg-white px-3 py-2 text-sm outline-none focus:border-secondary" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-primary-deep">Qualifications</label>
+                      <input value={form.qualifications} onChange={set('qualifications')} placeholder="e.g. Ph.D. Atmospheric Science, M.Sc. Meteorology (comma-separated)" className="w-full rounded-lg border border-border-soft bg-white px-3 py-2 text-sm outline-none focus:border-secondary" />
+                    </div>
+                  </div>
                 )}
               </>
             )}
@@ -198,8 +257,9 @@ export default function AuthPage() {
               pending admin approval before full access is granted.
             </p>
             <p className="mt-1.5">
-              If you are an administrator, see <code>scripts/provision-admin.mjs</code> for
-              secure account provisioning instructions.
+              Trainee and trainer accounts start pending verification and are
+              approved by an administrator. Administrator accounts are
+              provisioned server-side only.
             </p>
           </div>
         </div>

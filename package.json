@@ -9,7 +9,9 @@
   "lint": "oxlint",
   "preview": "vite preview",
   "predeploy": "npm run build",
-  "deploy": "gh-pages -d dist"
+  "deploy": "gh-pages -d dist",
+  "server": "npm --prefix server start",
+  "server:dev": "npm --prefix server run dev"
 },
   "dependencies": {
     "firebase": "^12.18.0",
