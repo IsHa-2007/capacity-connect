@@ -22,6 +22,7 @@ router.post('/:id/sections', authenticate, validate(courseIdParamSchema, 'params
 router.delete('/:id/sections/:sectionId', authenticate, validate(courseIdParamSchema, 'params'), validate(sectionIdParamSchema, 'params'), controller.removeSection)
 
 router.get('/:id/questions', authenticate, validate(courseIdParamSchema, 'params'), controller.listQuestions)
+router.get('/:id/questions/:questionId', authenticate, validate(courseIdParamSchema, 'params'), validate(questionIdParamSchema, 'params'), controller.getQuestion)
 router.post('/:id/questions', authenticate, validate(courseIdParamSchema, 'params'), validate(createQuestionSchema), controller.addQuestion)
 router.patch('/:id/questions/:questionId', authenticate, validate(courseIdParamSchema, 'params'), validate(questionIdParamSchema, 'params'), validate(updateQuestionSchema), controller.updateQuestion)
 router.delete('/:id/questions/:questionId', authenticate, validate(courseIdParamSchema, 'params'), validate(questionIdParamSchema, 'params'), controller.removeQuestion)

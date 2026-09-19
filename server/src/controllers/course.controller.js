@@ -105,6 +105,13 @@ export async function listQuestions(req, res, next) {
   } catch (err) { return next(err) }
 }
 
+export async function getQuestion(req, res, next) {
+  try {
+    const data = await courseService.getQuestion(req.user, req.params.id, req.params.questionId)
+    return sendSuccess(res, data)
+  } catch (err) { return next(err) }
+}
+
 export async function addQuestion(req, res, next) {
   try {
     const data = await courseService.addQuestion(req.user, req.params.id, req.body)

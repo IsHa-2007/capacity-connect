@@ -22,7 +22,7 @@ import {
   createSignedUrl as storageCreateSignedUrl,
   remove as storageRemove,
 } from '../services/storage.service.js'
-import { ROLE_TRAINER, ROLE_ADMIN, isApproved } from '../lib/roles.js'
+import { ROLE_TRAINER, ROLE_ADMIN, ROLE_TRAINEE, isApproved } from '../lib/roles.js'
 
 export const MIN_VALID_QUESTIONS = 5
 
@@ -106,7 +106,7 @@ export async function updateCourse(actor, courseId, patch) {
   // Publish gate: PUBLISHED requires >= MIN_VALID_QUESTIONS valid questions in
   // the bank. Only questions whose is_valid is TRUE count.
   if (patch.status === 'PUBLISHED') {
-    const { questions } = await repo.listQuestionsForCourse(courseId, { validOnly: true })
+    const questions = await repo.listQuestionsForCourse(courseId, { validOnly: true })
     if (questions.length < MIN_VALID_QUESTIONS) {
       throw new ApiError(
         409,
@@ -158,7 +158,34 @@ export async function listQuestions(actor, courseId, { validOnly = false } = {})
   requireActor(actor)
   const course = await repo.findCourseById(courseId)
   if (!course) throw new ApiError(404, 'COURSE_NOT_FOUND', 'The course could not be found.')
+  // Module 10 rule (§5/§19): trainees receive questions ONLY through the
+  // assessment flow — never the raw question bank (which carries correct answers).
+  if (actor.role === ROLE_TRAINEE) {
+    throw new ApiError(
+      403,
+      'QUESTION_BANK_ACCESS_DENIED',
+      'Trainees can only access questions through an assessment.',
+    )
+  }
+  if (actor.role !== ROLE_ADMIN) requireOwner(actor, course)
   return repo.listQuestionsForCourse(courseId, { validOnly })
+}
+
+export async function getQuestion(actor, courseId, questionId) {
+  requireActor(actor)
+  const course = await repo.findCourseById(courseId)
+  if (!course) throw new ApiError(404, 'COURSE_NOT_FOUND', 'The course could not be found.')
+  if (actor.role === ROLE_TRAINEE) {
+    throw new ApiError(
+      403,
+      'QUESTION_BANK_ACCESS_DENIED',
+      'Trainees can only access questions through an assessment.',
+    )
+  }
+  if (actor.role !== ROLE_ADMIN) requireOwner(actor, course)
+  const question = await repo.findQuestionById(courseId, questionId)
+  if (!question) throw new ApiError(404, 'QUESTION_NOT_FOUND', 'The question could not be found.')
+  return question
 }
 
 export async function addQuestion(actor, courseId, input) {

@@ -115,7 +115,7 @@ export async function enroll(actor, { courseId }) {
   if (!course) throw new ApiError(404, 'COURSE_NOT_FOUND', 'The course could not be found.')
 
   // Only a PUBLISHED course can be enrolled in; DRAFT is rejected at 409.
-  if (course.status !== COURSE_PUBLISHED) {
+  if (course.status !== 'PUBLISHED') {
     throw new ApiError(
       409,
       'COURSE_NOT_PUBLISHED',
