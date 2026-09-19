@@ -14,6 +14,7 @@
 //                 bodies never live in a canonical file_url column. Signed URLs
 //                 for content are generated on demand.
 
+import { randomUUID } from 'node:crypto'
 import { ApiError } from '../utils/apiResponse.js'
 import * as repo from '../repositories/course.repository.js'
 import {
@@ -22,6 +23,7 @@ import {
   createSignedUrl as storageCreateSignedUrl,
   remove as storageRemove,
 } from '../services/storage.service.js'
+import { materialForFolderError } from '../services/materialRules.service.js'
 import { ROLE_TRAINER, ROLE_ADMIN, ROLE_TRAINEE, isApproved } from '../lib/roles.js'
 
 export const MIN_VALID_QUESTIONS = 5
@@ -135,7 +137,16 @@ export async function listSections(actor, courseId) {
   requireActor(actor)
   const course = await repo.findCourseById(courseId)
   if (!course) throw new ApiError(404, 'COURSE_NOT_FOUND', 'The course could not be found.')
-  return repo.listSectionsForCourse(courseId)
+  const sections = await repo.listSectionsForCourse(courseId)
+  // Storage-backed materials are served as on-demand signed URLs (the same
+  // contract the enrollment workspace uses), never permanent public URLs.
+  return Promise.all(
+    sections.map(async (section) => {
+      if (!section.storagePath) return section
+      const { signedUrl } = await storageCreateSignedUrl(section.storagePath)
+      return { ...section, signedUrl: signedUrl || null }
+    }),
+  )
 }
 
 export async function addSection(actor, courseId, input) {
@@ -144,10 +155,86 @@ export async function addSection(actor, courseId, input) {
   return repo.createSectionRow({ ...input, course_id: courseId })
 }
 
+const SECTION_TYPE_FOLDER = {
+  NOTES: 'notes',
+  SLIDES: 'slides',
+  VIDEOS: 'videos',
+  PRACTICE: 'practice',
+}
+
+function extOf(name = '') {
+  const parts = String(name).split('.')
+  const ext = parts.length > 1 ? parts.pop().toLowerCase() : 'bin'
+  return /^[a-z0-9]{1,8}$/i.test(ext) ? ext : 'bin'
+}
+
+// Upload a course material file into the private storage bucket and record the
+// section row. The file bytes never live in the database — only the storage
+// metadata (bucket + path + mime + size + original filename) is persisted,
+// exactly like the Module 8 frozen contract. The file body is uploaded FIRST so
+// a rejected format or a missing bucket fails before any row is written; if the
+// row insert then fails the just-uploaded object is best-effort removed so a
+// failed upload never leaves an orphaned file behind.
+export async function uploadSection(actor, courseId, { file, sectionType, orderIndex, title }) {
+  const course = await repo.findCourseById(courseId)
+  requireOwner(actor, course)
+
+  if (!file) {
+    throw new ApiError(400, 'FILE_REQUIRED', 'A file is required for this section.')
+  }
+
+  const formatError = materialForFolderError(sectionType, file.originalname, file.mimetype)
+  if (formatError) {
+    throw new ApiError(400, 'FILE_TYPE_UNSUPPORTED', formatError)
+  }
+
+  const folder = SECTION_TYPE_FOLDER[sectionType]
+  if (!folder) {
+    throw new ApiError(400, 'SECTION_TYPE_INVALID', `Unsupported section type: ${sectionType}.`)
+  }
+
+  // Namespace by courseId + folder so course files never collide and remain
+  // grouped in the bucket, and always use a fresh UUID so re-uploads of the
+  // same original file name create a distinct object without clobbering.
+  const ext = extOf(file.originalname)
+  const storagePath = `courses/${courseId}/${folder}/${randomUUID()}.${ext}`
+
+  await storageUpload({
+    path: storagePath,
+    body: file.buffer,
+    contentType: file.mimetype || 'application/octet-stream',
+    metadata: { courseId, sectionType, uploadedBy: actor.id },
+  })
+
+  try {
+    return await repo.createSectionRow({
+      courseId,
+      sectionType,
+      orderIndex,
+      title,
+      storageBucket: STORAGE_BUCKET,
+      storagePath,
+      mimeType: file.mimetype || null,
+      fileSize: file.size,
+      originalFilename: file.originalname,
+    })
+  } catch (err) {
+    await storageRemove([storagePath]).catch(() => {})
+    throw err
+  }
+}
+
 export async function removeSection(actor, courseId, sectionId) {
   const course = await repo.findCourseById(courseId)
   requireOwner(actor, course)
-  return repo.removeSectionRow(sectionId)
+  const section = (await repo.listSectionsForCourse(courseId)).find((s) => String(s.id) === String(sectionId))
+  const removed = await repo.removeSectionRow(sectionId)
+  // Clean up the stored object when this section was storage-backed (best-effort;
+  // a missing object is not an error for the caller).
+  if (section?.storagePath) {
+    await storageRemove([section.storagePath]).catch(() => {})
+  }
+  return removed
 }
 
 // ---------------------------------------------------------------------------

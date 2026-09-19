@@ -1,11 +1,12 @@
 ﻿import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate.js'
 import { validate } from '../middleware/validate.js'
+import { uploadMaterialFile, uploadError } from '../middleware/upload.js'
 import * as controller from '../controllers/course.controller.js'
 import {
   createCourseSchema, updateCourseSchema,
   courseIdParamSchema, createSectionSchema, updateSectionSchema,
-  sectionIdParamSchema,
+  sectionIdParamSchema, uploadSectionFieldsSchema,
   createQuestionSchema, updateQuestionSchema, questionIdParamSchema,
 } from '../validators/course.validator.js'
 
@@ -19,6 +20,15 @@ router.delete('/:id', authenticate, validate(courseIdParamSchema, 'params'), con
 
 router.get('/:id/sections', authenticate, validate(courseIdParamSchema, 'params'), controller.listSections)
 router.post('/:id/sections', authenticate, validate(courseIdParamSchema, 'params'), validate(createSectionSchema), controller.addSection)
+router.post(
+  '/:id/sections/upload',
+  authenticate,
+  validate(courseIdParamSchema, 'params'),
+  uploadMaterialFile,
+  uploadError,
+  validate(uploadSectionFieldsSchema),
+  controller.uploadSection,
+)
 router.delete('/:id/sections/:sectionId', authenticate, validate(courseIdParamSchema, 'params'), validate(sectionIdParamSchema, 'params'), controller.removeSection)
 
 router.get('/:id/questions', authenticate, validate(courseIdParamSchema, 'params'), controller.listQuestions)

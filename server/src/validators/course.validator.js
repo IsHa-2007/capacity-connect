@@ -99,6 +99,19 @@ export const sectionIdParamSchema = z.object({
   sectionId: z.string().uuid('Section id must be a valid UUID.'),
 })
 
+// Multipart file-upload fields for POST /courses/:id/sections/upload. The file
+// itself is parsed by multer (memory storage); these are the companion form
+// fields. Storage metadata (bucket/path/mime/size/originalFilename) is ALWAYS
+// derived server-side from the uploaded file and is never accepted from the
+// client — the contract is identical to createSectionSchema's metadata fields.
+export const uploadSectionFieldsSchema = z.object({
+  sectionType: z.enum(SECTION_TYPES, {
+    errorMap: () => ({ message: `sectionType must be one of: ${SECTION_TYPES.join(', ')}` }),
+  }),
+  orderIndex: z.coerce.number().int().min(0).optional().default(0),
+  title: z.string().trim().max(200).optional().nullable(),
+})
+
 // ---------------------------------------------------------------------------
 // QUESTION BANK
 // ---------------------------------------------------------------------------

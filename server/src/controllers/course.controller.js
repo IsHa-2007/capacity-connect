@@ -91,6 +91,23 @@ export async function addSection(req, res, next) {
   } catch (err) { return next(err) }
 }
 
+// POST /api/courses/:id/sections/upload — multipart file upload into the
+// private storage bucket. The actor is hydrated for full RBAC (the section
+// service requires an APPROVED TRAINER owner); the file is parsed by multer and
+// all storage metadata is derived server-side.
+export async function uploadSection(req, res, next) {
+  try {
+    const actor = await hydrateActor(req)
+    const data = await courseService.uploadSection(actor, req.params.id, {
+      file: req.file,
+      sectionType: req.body?.sectionType,
+      orderIndex: req.body?.orderIndex,
+      title: req.body?.title || null,
+    })
+    return sendSuccess(res, data, 201)
+  } catch (err) { return next(err) }
+}
+
 export async function removeSection(req, res, next) {
   try {
     const data = await courseService.removeSection(req.user, req.params.id, req.params.sectionId)
