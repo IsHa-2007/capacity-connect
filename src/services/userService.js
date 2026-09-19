@@ -1,34 +1,26 @@
-// Firestore-backed user service for CAPACITY CONNECT.
+// User service layer for CAPACITY CONNECT (DEV / MOCK path only).
 //
-// All Firestore access for user accounts, roles and approval status lives here.
-// UI components must NOT query Firestore directly.
+// All user account, role and approval-status operations for the offline dev
+// path live here. UI components must NOT mutate user records directly.
 //
-// When Firebase is not configured, these functions transparently fall back to a
-// small in-memory mock store so the platform remains runnable during development.
-// This fallback is EXPLICITLY a development convenience — it is not a real
-// persistent backend and is never advertised as production. It does not use
-// localStorage.
+// REAL (supabase) users are served by the backend (userApi.js / AuthContext).
+// This module is the isolated in-memory fallback used only when the backend is
+// unreachable in local development (DEV_MOCK_AUTH). It does NOT use Firebase,
+// Firestore or localStorage; it is not production persistence and is never
+// advertised as such.
+//
+// Profile-photo / certification file uploads in this mock path go to Cloudinary
+// when configured (unsigned browser preset) and otherwise resolve to temporary
+// in-memory object URLs for the current page session only.
 
-import {
-  collection,
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  query,
-  where,
-  getDocs,
-  serverTimestamp,
-} from 'firebase/firestore'
-import { isFirebaseConfigured, getFirebase } from '../firebase/config'
 import { uploadToCloudinary, isCloudinaryConfigured, validateImageFile } from './cloudinaryService'
 import { users as seedUsers } from '../data/mockData'
 
 // ---------------------------------------------------------------------------
-// MOCK / DEVELOPMENT-ONLY note: when Firebase Storage is unavailable, uploaded
-// files resolve to in-memory browser object URLs that live for the current page
-// session only. They are NEVER written to localStorage and reset on reload,
-// mirroring the in-memory mock behaviour used elsewhere in development.
+// MOCK / DEVELOPMENT-ONLY note: when uploads are unavailable, files resolve to
+// in-memory browser object URLs that live for the current page session only.
+// They are NEVER written to localStorage and reset on reload, mirroring the
+// in-memory mock behaviour used elsewhere in development.
 
 const MOCK_PROFILES = new Map(
   seedUsers.map((u) => [
@@ -112,7 +104,7 @@ function mockGet(uid) {
 }
 
 export async function createUserProfile({ uid, fullName, email, role, station, department, empId, title, expertise, experience }) {
-  const now = serverTimestamp()
+  const now = new Date().toISOString()
   const data = {
     uid,
     fullName,
@@ -149,39 +141,22 @@ export async function createUserProfile({ uid, fullName, email, role, station, d
       certifications: [],
     }),
   }
-  if (isFirebaseConfigured()) {
-    const { db } = getFirebase()
-    try {
-      await setDoc(doc(db, 'users', uid), data)
-      console.log('[userService] Firestore profile created for', uid)
-    } catch (err) {
-      console.error('[userService] Firestore setDoc FAILED:', err.code || err.message || err)
-      throw err
-    }
-  } else {
-    MOCK_PROFILES.set(uid, {
+  MOCK_PROFILES.set(uid, {
       ...data,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     })
-  }
   return data
 }
 
 export async function getUserProfile(uid) {
-  if (isFirebaseConfigured()) {
-    const { db } = getFirebase()
-    const snap = await getDoc(doc(db, 'users', uid))
-    if (!snap.exists()) return null
-    return { uid: snap.id, ...snap.data() }
-  }
   return mockGet(uid)
 }
 
 // Profile editing must never be able to touch identity / permission fields.
 // Only the profile editor and certification flows are permitted to mutate a
 // user's professional data; role, approvalStatus, uid and auth-controlled email
-// are stripped here and also blocked by firestore.rules on the data layer.
+// are stripped here at the service layer.
 const PROTECTED_KEYS = new Set(['role', 'approvalStatus', 'uid', 'email'])
 
 export async function updateUserProfile(uid, patch) {
@@ -202,25 +177,14 @@ export async function updateUserProfile(uid, patch) {
     else if (safePatch[k] !== undefined) delete safePatch[k]
   }
 
-  if (isFirebaseConfigured()) {
-    const { db } = getFirebase()
-    const snap = await getDoc(doc(db, 'users', uid))
-    const current = snap.exists() ? snap.data() : {}
-    const merged = { ...current, ...safePatch }
-    await updateDoc(doc(db, 'users', uid), {
-      ...safePatch,
-      profileCompletion: profileCompletionFor(merged),
-      updatedAt: serverTimestamp(),
-    })
-  } else if (MOCK_PROFILES.has(uid)) {
-    const current = MOCK_PROFILES.get(uid)
-    const merged = { ...current, ...safePatch }
-    MOCK_PROFILES.set(uid, {
-      ...merged,
-      profileCompletion: profileCompletionFor(merged),
-      updatedAt: new Date().toISOString(),
-    })
-  }
+  if (!MOCK_PROFILES.has(uid)) return getUserProfile(uid)
+  const current = MOCK_PROFILES.get(uid)
+  const merged = { ...current, ...safePatch }
+  MOCK_PROFILES.set(uid, {
+    ...merged,
+    profileCompletion: profileCompletionFor(merged),
+    updatedAt: new Date().toISOString(),
+  })
   return getUserProfile(uid)
 }
 
@@ -267,11 +231,11 @@ export async function removeCertification(uid, certificationId) {
 // ---------------------------------------------------------------------------
 // FILE UPLOAD ARCHITECTURE
 // ---------------------------------------------------------------------------
-// Production: files go to Cloudinary (NOT Firebase Storage); only the Cloudinary
-// URL / public_id / metadata is written to Firestore. When Cloudinary is not
-// configured we produce a temporary in-memory object URL for the current page
-// session only — it is never persisted to localStorage and does not pretend to
-// be permanent storage.
+// File blobs in this mock path go to Cloudinary (NOT Firebase Storage); only the
+// Cloudinary URL / public_id / metadata is attached to the user record. When
+// Cloudinary is not configured we produce a temporary in-memory object URL for
+// the current page session only — it is never persisted to localStorage and
+// does not pretend to be permanent storage.
 
 const MOCK_BLOB_URLS = new Map()
 
@@ -337,21 +301,10 @@ export async function uploadCertificationFile(uid, certificationId, file) {
 }
 
 export async function getPendingUsers() {
-  if (isFirebaseConfigured()) {
-    const { db } = getFirebase()
-    const q = query(collection(db, 'users'), where('approvalStatus', '==', 'PENDING'))
-    const snap = await getDocs(q)
-    return snap.docs.map((d) => ({ uid: d.id, ...d.data() }))
-  }
   return [...MOCK_PROFILES.values()].filter((u) => u.approvalStatus === 'PENDING')
 }
 
 export async function getAllUsers() {
-  if (isFirebaseConfigured()) {
-    const { db } = getFirebase()
-    const snap = await getDocs(collection(db, 'users'))
-    return snap.docs.map((d) => ({ uid: d.id, ...d.data() }))
-  }
   return [...MOCK_PROFILES.values()]
 }
 
@@ -380,13 +333,10 @@ export async function getSearchableUsers() {
     }))
 }
 
-// Only ADMIN callers should reach these. The frontend enforces the role check;
-// Firestore security rules enforce it at the data layer (firestore.rules).
+// Only ADMIN callers should reach these through AuthContext; the frontend
+// enforces that role check (the mock store has no data-layer rules to lean on).
 export async function setApprovalStatus(uid, status) {
-  if (isFirebaseConfigured()) {
-    const { db } = getFirebase()
-    await updateDoc(doc(db, 'users', uid), { approvalStatus: status, updatedAt: serverTimestamp() })
-  } else if (MOCK_PROFILES.has(uid)) {
+  if (MOCK_PROFILES.has(uid)) {
     MOCK_PROFILES.set(uid, {
       ...MOCK_PROFILES.get(uid),
       approvalStatus: status,
@@ -399,13 +349,9 @@ export async function setApprovalStatus(uid, status) {
 export const approveUser = (uid) => setApprovalStatus(uid, 'APPROVED')
 export const rejectUser = (uid) => setApprovalStatus(uid, 'REJECTED')
 
-// Role change is an ADMIN-only operation. The frontend guards the caller; Firestore
-// security rules enforce it at the data layer (firestore.rules).
+// Role change is an ADMIN-only operation. The frontend guards the caller.
 export async function setUserRole(uid, role) {
-  if (isFirebaseConfigured()) {
-    const { db } = getFirebase()
-    await updateDoc(doc(db, 'users', uid), { role, updatedAt: serverTimestamp() })
-  } else if (MOCK_PROFILES.has(uid)) {
+  if (MOCK_PROFILES.has(uid)) {
     MOCK_PROFILES.set(uid, {
       ...MOCK_PROFILES.get(uid),
       role,

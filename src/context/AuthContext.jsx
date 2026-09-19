@@ -62,7 +62,7 @@ function photoUrlFor(p) {
   return cloudPhotoUrl(p?.photoPublicId)
 }
 
-// Normalises BOTH backend (public.users) and mock/Firestore profiles into the
+// Normalises BOTH backend (public.users) and mock seed profiles into the
 // shape the rest of the app consumes (id+uid, name+fullName, status+approvalStatus).
 function normalizeProfile(p) {
   if (!p) return null
@@ -114,7 +114,7 @@ export function AuthProvider({ children }) {
 
   // Load all users (admin verification queue + history). Real (supabase) admins
   // read the authoritative backend directory; the dev mock path keeps using the
-  // in-memory/Firestore service so the demo still works offline.
+  // in-memory mock service so the demo still works offline.
   const loadUsers = useCallback(async () => {
     try {
       const fromBackend = currentUser?.authSource === 'supabase'
@@ -305,7 +305,7 @@ export function AuthProvider({ children }) {
 
   // Load any user's profile by uid. Real users read the backend (the server
   // applies its RBAC projection: full for ADMIN, public for APPROVED peers);
-  // dev mock users read the Firestore/in-memory directory.
+  // dev mock users read the in-memory directory.
   const getProfileByUid = useCallback(async (uid) => {
     if (!uid) return null
     try {
@@ -363,7 +363,7 @@ export function AuthProvider({ children }) {
 
   // -------------------------------------------------------------------------
   // ADMIN APPROVAL — real admins mutate public.users via the backend; the dev
-  // mock path continues through the Firestore/in-memory service offline.
+  // mock path continues through the in-memory mock service offline.
   // -------------------------------------------------------------------------
   const approveUser = async (uid) => {
     try {

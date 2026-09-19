@@ -15,7 +15,7 @@ dist-ssr
 .env.*
 !.env.example
 
-# Firebase Admin service account (NEVER commit)
+# Service account credentials (NEVER commit)
 serviceAccount.json
 
 # Editor directories and files

@@ -10,8 +10,8 @@ import { useCourses } from '../../context/CourseContext'
 import { exportCertificatePDF } from '../../utils/pdfExport'
 
 // Governance view of every completed certificate across all courses. Only ADMIN
-// reaches this route (ProtectedRoute + firestore.rules allow admins to read all
-// enrollment documents, of which the certificate is a field).
+// reaches this route (ProtectedRoute + AllCertificates is admin-scoped in
+// CourseContext, which reads the backend certificate/enrollment data).
 export default function AdminCertificatesView() {
   const { currentUser } = useAuth()
   const { allCertificates, courseById } = useCourses()

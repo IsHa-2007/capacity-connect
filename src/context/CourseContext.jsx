@@ -2,7 +2,6 @@ import { createContext, useContext, useCallback, useEffect, useMemo, useState } 
 import { seedCompetencyRecords, stationRegionMap } from '../data/mockData'
 import { useAuth } from './AuthContext'
 import * as courseService from '../services/courseService'
-import { isFirebaseConfigured } from '../firebase/config'
 import { ownedTrainerIds } from '../utils/trainerOwnership'
 import * as courseApi from '../services/courseApi'
 import * as enrollmentApi from '../services/enrollmentApi'
@@ -15,7 +14,7 @@ export function CourseProvider({ children }) {
   const { currentUser } = useAuth()
 
   // Stateful course catalog — the reactive in-memory store for this session.
-  // Initialized from the service's (mock or Firestore) data source.
+  // Initialized from the service's (mock) data source.
   const [courses, setCourses] = useState(() => seedCoursesSnapshot())
 
   const backendActive = Boolean(currentUser && currentUser.authSource === 'supabase')
@@ -24,7 +23,7 @@ export function CourseProvider({ children }) {
   // authoritative backend (trainees see only PUBLISHED courses; trainers/admins
   // see every course they are entitled to). Trainer-owned courses are hydrated
   // with their sections + question bank so the course-management UI keeps
-  // working against persisted data. The Firestore/mock path is unchanged.
+  // working against persisted data. The in-memory dev-mock path is unchanged.
   useEffect(() => {
     if (!currentUser) return
     if (backendActive) {
@@ -83,7 +82,6 @@ export function CourseProvider({ children }) {
         active = false
       }
     }
-    if (!isFirebaseConfigured()) return
     let active = true
     courseService
       .getAllCourses(currentUser)
@@ -92,7 +90,7 @@ export function CourseProvider({ children }) {
       })
       .catch((err) => {
         // eslint-disable-next-line no-console
-        console.warn('[CourseContext] Failed to load courses from Firestore:', err.message)
+        console.warn('[CourseContext] Failed to load courses from the mock store:', err.message)
       })
     return () => {
       active = false
@@ -101,13 +99,13 @@ export function CourseProvider({ children }) {
 
   // User-scoped enrollments (traineeId + trainerId + courseId) which also carry
   // the course certificate once a course is completed. Seeded from the service's
-  // (mock or Firestore-resolved) data source.
+  // (mock) data source.
   const [enrollments, setEnrollments] = useState(() => courseService._enrollmentsSeed())
 
   // Load the caller's enrollments. Real (supabase) users read the authoritative
   // backend enrollment rows; trainers additionally pull full rows (assessment +
   // feedback) and issued certificates so the trainer course workspace stays
-  // complete. The Firestore/mock path is unchanged.
+  // complete. The in-memory dev-mock path is unchanged.
   useEffect(() => {
     if (!currentUser) return
     if (backendActive) {
@@ -121,7 +119,6 @@ export function CourseProvider({ children }) {
         active = false
       }
     }
-    if (!isFirebaseConfigured()) return
     let active = true
     courseService
       .getEnrollments(currentUser)
@@ -130,7 +127,7 @@ export function CourseProvider({ children }) {
       })
       .catch((err) => {
         // eslint-disable-next-line no-console
-        console.warn('[CourseContext] Failed to load enrollments from Firestore:', err.message)
+        console.warn('[CourseContext] Failed to load enrollments from the mock store:', err.message)
       })
     return () => {
       active = false
@@ -260,7 +257,7 @@ export function CourseProvider({ children }) {
 
   const updateEnrollment = (courseId, patch) => {
     if (!currentUser || currentUser.role !== 'TRAINEE' || currentUser.status !== 'approved') return
-    // Persist through the service (Firestore when configured) while mirroring
+    // Persist through the service (mock store) while mirroring
     // into React state so the workspace updates live. Callers treat this as
     // fire-and-forget; failures are logged, never surfaced mid-interaction.
     courseService

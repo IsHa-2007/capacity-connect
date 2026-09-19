@@ -276,8 +276,8 @@ function EditCourseModal({ course, open, onClose, onSave }) {
 
 // ---------------------------------------------------------------------------
 // Generic content-section manager (Study Notes / Slide Decks / Practice).
-// Handles uploading files (Firebase Storage or dev-mock object URL) and
-// opening them in-app via the shared InAppFileViewer.
+// Uploads go through the backend (supabase users) or the dev-mock upload path,
+// and files open in-app via the shared InAppFileViewer.
 // ---------------------------------------------------------------------------
 function SectionManager({ course, section, icon: Icon, title, empty }) {
   const { addContent, removeContent, uploadCourseFile } = useCourses()

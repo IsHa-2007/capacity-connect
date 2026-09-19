@@ -13,7 +13,7 @@
 //
 // When Cloudinary is not configured, this service transparently falls back to a
 // temporary in-memory object URL (development mock only) so the app remains
-// runnable, mirroring the existing Firebase mock behaviour.
+// runnable.
 
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
