@@ -16,7 +16,6 @@ import {
   Presentation,
   RefreshCw,
 } from 'lucide-react'
-import { useAuth } from '../../context/AuthContext'
 import { useCourses } from '../../context/CourseContext'
 import { Card, Badge } from '../common/ui'
 import * as enrollmentApi from '../../services/enrollmentApi.js'
@@ -72,7 +71,6 @@ function hasSubmittedFeedback(feedback) {
 export default function CourseWorkspace() {
   const { courseId } = useParams()
   const navigate = useNavigate()
-  const { currentUser } = useAuth()
   const { courseCatalog, courseById } = useCourses()
   const [activeTab, setActiveTab] = useState('overview')
   const [showFeedback, setShowFeedback] = useState(false)
@@ -330,7 +328,7 @@ export default function CourseWorkspace() {
           />
         )
       case 'certificate':
-        return <CertificateView course={course} enrollment={en} user={currentUser} />
+        return <CertificateView course={course} enrollmentId={enrollmentId} />
       default:
         return <OverviewPanel course={course} en={en} />
     }

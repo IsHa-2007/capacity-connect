@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Award,
   BadgeCheck,
@@ -17,22 +17,37 @@ import { Card, Badge, Button, ProgressBar } from '../common/ui'
 import ProfileEditor from '../profile/ProfileEditor'
 import CertificationManager from '../profile/CertificationManager'
 import { exportCertificatePDF } from '../../utils/pdfExport'
+import { listCertificates } from '../../services/certificateApi.js'
 
 export default function ProfileView() {
   const { currentUser } = useAuth()
   const { courseCatalog, getEnrollment } = useCourses()
   const [editing, setEditing] = useState(false)
+  // Module 12 — platform-issued certificates come from the backend certificate
+  // API (role-scoped to the trainee), never from localStorage or mock data.
+  const [platformCerts, setPlatformCerts] = useState(null) // null = loading
+
+  useEffect(() => {
+    if (currentUser?.role !== 'TRAINEE') return
+    let cancelled = false
+    listCertificates()
+      .then((rows) => {
+        if (!cancelled) setPlatformCerts(Array.isArray(rows) ? rows : [])
+      })
+      .catch(() => {
+        if (!cancelled) setPlatformCerts([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [currentUser?.role])
 
   const completedCourses = courseCatalog.filter(
     (c) => getEnrollment(c.id)?.status === 'completed',
   )
-  const certs = completedCourses
-    .map((c) => ({ course: c, cert: getEnrollment(c.id).certificate, assessment: getEnrollment(c.id).assessment }))
-    .filter((c) => c.cert)
-
-  const averageScore = certs.length
-    ? certs.reduce((s, x) => s + (x.assessment?.percentage || 82), 0) / certs.length
-    : 0
+  const certs = platformCerts ?? []
+  const scored = certs.map((c) => Number(c.score)).filter((n) => !Number.isNaN(n))
+  const averageScore = scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : 0
 
   const completion = Number(currentUser?.profileCompletion) || 0
   const profCerts = Array.isArray(currentUser?.certifications) ? currentUser.certifications : []
@@ -163,21 +178,15 @@ export default function ProfileView() {
             </h3>
             {completedCourses.length ? (
               <div className="mt-4 space-y-3">
-                {completedCourses.map((c) => {
-                  const en = getEnrollment(c.id)
-                  return (
-                    <div key={c.id} className="flex items-center justify-between rounded-xl border border-border-subtle bg-sky-soft p-4">
-                      <div>
-                        <p className="font-medium text-primary-deep">{c.title}</p>
-                        <p className="text-xs text-slate-muted">{c.domain} · Completed {en.certificate?.issuedOn}</p>
-                      </div>
-                      <div className="text-right">
-                        <Badge tone="green">Score {en.assessment?.percentage}%</Badge>
-                        <p className="mt-1 text-[10px] text-slate-muted">{en.certificate?.id}</p>
-                      </div>
+                {completedCourses.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between rounded-xl border border-border-subtle bg-sky-soft p-4">
+                    <div>
+                      <p className="font-medium text-primary-deep">{c.title}</p>
+                      <p className="text-xs text-slate-muted">{c.domain}</p>
                     </div>
-                  )
-                })}
+                    <Badge tone="green">Completed</Badge>
+                  </div>
+                ))}
               </div>
             ) : (
               <p className="mt-3 text-sm text-slate-muted">No completed courses yet.</p>
@@ -188,25 +197,42 @@ export default function ProfileView() {
             <h3 className="flex items-center gap-2 font-semibold text-primary-deep">
               <GraduationCap size={17} className="text-primary" /> Course Completion Certificates
             </h3>
-            {certs.length ? (
+            {platformCerts === null ? (
+              <p className="mt-3 text-sm text-slate-muted">Loading certificates…</p>
+            ) : certs.length ? (
               <div className="mt-4 space-y-3">
-                {certs.map(({ course, cert, assessment }) => (
-                  <div key={course.id} className="flex items-center justify-between rounded-xl border border-border-soft bg-sky-soft p-4">
-                    <div className="flex items-center gap-3">
-                      <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-white"><Award size={18} /></span>
-                      <div>
-                        <p className="font-medium text-primary-deep">{course.title} — Certificate</p>
-                        <p className="text-xs text-slate-muted">{cert.id} · {cert.issuedOn}</p>
+                {certs.map((cert) => {
+                  const matched = courseCatalog.find((c) => String(c.id) === String(cert.courseId))
+                  const trainer = matched?.trainer || ''
+                  const courseTitle = cert.courseTitle || matched?.title || 'Course'
+                  return (
+                    <div key={cert.id || cert.certificateNumber} className="flex items-center justify-between rounded-xl border border-border-soft bg-sky-soft p-4">
+                      <div className="flex items-center gap-3">
+                        <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-white"><Award size={18} /></span>
+                        <div>
+                          <p className="font-medium text-primary-deep">{courseTitle} — Certificate</p>
+                          <p className="text-xs text-slate-muted">{cert.certificateNumber} · {formatDate(cert.issuedOn)}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <Badge tone="green">Score {cert.score != null ? `${cert.score}%` : '—'}</Badge>
+                        <button
+                          onClick={() => exportCertificatePDF({
+                            traineeName: cert.traineeName || currentUser?.name || 'Trainee',
+                            courseName: courseTitle,
+                            completionDate: cert.issuedOn,
+                            certId: cert.certificateNumber,
+                            trainer,
+                            score: cert.score ?? 0,
+                          })}
+                          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-medium text-primary hover:bg-sky-light"
+                        >
+                          <Download size={14} /> PDF
+                        </button>
                       </div>
                     </div>
-                    <button
-                      onClick={() => exportCertificatePDF({ traineeName: currentUser.name, courseName: course.title, completionDate: cert.issuedOn, certId: cert.id, trainer: course.trainer, score: assessment?.percentage || 82 })}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-medium text-primary hover:bg-sky-light"
-                    >
-                      <Download size={14} /> PDF
-                    </button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <p className="mt-3 text-sm text-slate-muted">No course completion certificates yet.</p>
@@ -231,6 +257,13 @@ export default function ProfileView() {
       <ProfileEditor open={editing} onClose={() => setEditing(false)} />
     </div>
   )
+}
+
+function formatDate(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function InfoRow({ label, value }) {

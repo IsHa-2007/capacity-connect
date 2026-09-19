@@ -21,6 +21,7 @@ import { useBroadcasts } from '../../context/BroadcastContext'
 import { Card, Button, StatCard, Badge } from '../common/ui'
 import { exportCertificatePDF } from '../../utils/pdfExport'
 import { getTrainerFeedbackAnalytics } from '../../services/enrollmentApi.js'
+import { listCertificates } from '../../services/certificateApi.js'
 
 export default function TrainerHomeView() {
   const navigate = useNavigate()
@@ -30,6 +31,8 @@ export default function TrainerHomeView() {
   const { broadcasts } = useBroadcasts()
   const [backendFeedback, setBackendFeedback] = useState(null)
   const [feedbackError, setFeedbackError] = useState(false)
+  const [backendCertificates, setBackendCertificates] = useState(null)
+  const [certificateError, setCertificateError] = useState(false)
 
   // MODULE 11 — trainer feedback analytics come straight from the backend
   // (aggregations over enrollments for the courses this trainer owns). When the
@@ -51,6 +54,25 @@ export default function TrainerHomeView() {
     }
   }, [currentUser?.role])
 
+  // MODULE 12 — trainer certificate inventory comes from the backend
+  // certificate API (role-scoped to courses this trainer owns). Backend-first,
+  // falling back to the trainer context so the dashboard never goes blank.
+  useEffect(() => {
+    if (currentUser?.role !== 'TRAINER') return
+    let cancelled = false
+    listCertificates()
+      .then((rows) => {
+        if (cancelled) return
+        if (Array.isArray(rows)) setBackendCertificates(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setCertificateError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [currentUser?.role])
+
   const isPending = currentUser?.status === 'pending'
 
   const trainerBroadcasts = broadcasts.filter(
@@ -58,6 +80,7 @@ export default function TrainerHomeView() {
   )
 
   const published = myCourses.filter((c) => c.status === 'published').length
+  const certificateRows = backendCertificates ?? courseCertificates
   const fbCount = backendFeedback?.feedbackCount ?? analytics.feedbackCount
   const fbRatings =
     backendFeedback?.feedbackRatings ?? analytics.feedbackRatings
@@ -197,9 +220,9 @@ export default function TrainerHomeView() {
           <h3 className="flex items-center gap-2 font-semibold text-primary-deep">
             <Award size={18} className="text-primary" /> Completed Certificates
           </h3>
-          <Badge>{courseCertificates.length} issued</Badge>
+          <Badge>{certificateRows.length} issued</Badge>
         </div>
-        {courseCertificates.length ? (
+        {certificateRows.length ? (
           <div className="mt-4 overflow-x-auto scroll-thin">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead>
@@ -213,37 +236,49 @@ export default function TrainerHomeView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
-                {courseCertificates.slice(0, 8).map((c) => (
-                  <tr key={`${c.courseId}:${c.traineeId}`} className="hover:bg-sky-soft/50">
-                    <td className="px-4 py-3 font-medium text-primary-deep">{c.traineeName || c.traineeId}</td>
-                    <td className="px-4 py-3 text-slate-body">{c.courseTitle || c.courseId}</td>
-                    <td className="px-4 py-3">{c.assessment?.percentage ?? '—'}%</td>
-                    <td className="px-4 py-3 text-slate-body">{c.certificate?.issuedOn}</td>
-                    <td className="px-4 py-3 text-slate-muted">{c.certificate?.id}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() =>
-                          exportCertificatePDF({
-                            traineeName: c.traineeName || c.traineeId || 'Trainee',
-                            courseName: c.courseTitle || c.courseId,
-                            completionDate: c.certificate.issuedOn,
-                            certId: c.certificate.id,
-                            trainer: c.trainerName || myCourses.find((m) => m.id === c.courseId)?.trainer || '',
-                            score: c.assessment?.percentage || 82,
-                          })
-                        }
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-medium text-primary hover:bg-sky-light"
-                      >
-                        <Download size={14} /> PDF
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {certificateRows.slice(0, 8).map((c) => {
+                  const row = toCertificateRow(c)
+                  const trainer =
+                    myCourses.find((m) => String(m.id) === String(row.courseId))?.trainer ||
+                    currentUser?.name ||
+                    ''
+                  return (
+                    <tr key={row.certificateNumber || row.courseId} className="hover:bg-sky-soft/50">
+                      <td className="px-4 py-3 font-medium text-primary-deep">{row.traineeName || 'Trainee'}</td>
+                      <td className="px-4 py-3 text-slate-body">{row.courseTitle || 'Course'}</td>
+                      <td className="px-4 py-3">{row.score ?? '—'}%</td>
+                      <td className="px-4 py-3 text-slate-body">{formatDate(row.issuedOn)}</td>
+                      <td className="px-4 py-3 text-slate-muted">{row.certificateNumber}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() =>
+                            exportCertificatePDF({
+                              traineeName: row.traineeName || 'Trainee',
+                              courseName: row.courseTitle || 'Course',
+                              completionDate: row.issuedOn,
+                              certId: row.certificateNumber,
+                              trainer,
+                              score: row.score ?? 0,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-medium text-primary hover:bg-sky-light"
+                        >
+                          <Download size={14} /> PDF
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         ) : (
           <p className="mt-4 text-sm text-slate-muted">No certificates issued yet. Completed trainees' certificates will appear here.</p>
+        )}
+        {certificateError && (
+          <p className="mt-4 text-xs text-slate-muted">
+            Live certificate data is currently unavailable; showing the locally cached summary.
+          </p>
         )}
       </Card>
 
@@ -300,4 +335,26 @@ function firstName(name) {
   const titleRe = /^(Dr|Mr|Mrs|Ms|Prof|Smt|Shri|Sri|Er)\.?$/i
   const first = parts.find((p) => !titleRe.test(p))
   return first || parts[0]
+}
+
+// Normalizes a certificate record from either the backend certificate API
+// (flat list item) or the legacy trainer context (enrollment with an embedded
+// certificate) into the single table shape used below.
+function toCertificateRow(c) {
+  if (!c) return {}
+  return {
+    courseId: c.courseId,
+    traineeName: c.traineeName || c.traineeId || null,
+    courseTitle: c.courseTitle || c.courseId || null,
+    score: c.score != null ? c.score : c.assessment?.percentage ?? null,
+    issuedOn: c.issuedOn || c.certificate?.issuedOn || null,
+    certificateNumber: c.certificateNumber || c.certificate?.certificateNumber || c.certificate?.id || null,
+  }
+}
+
+function formatDate(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }

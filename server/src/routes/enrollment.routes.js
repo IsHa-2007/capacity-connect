@@ -10,6 +10,7 @@ import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate.js'
 import { validate } from '../middleware/validate.js'
 import * as controller from '../controllers/enrollment.controller.js'
+import * as certificateController from '../controllers/certificate.controller.js'
 import {
   createEnrollmentSchema,
   updateEnrollmentSchema,
@@ -33,5 +34,9 @@ router.patch('/:id', authenticate, validate(enrollmentIdParamSchema, 'params'), 
 router.post('/:id/progress', authenticate, validate(enrollmentIdParamSchema, 'params'), validate(completeSectionSchema), controller.markSectionComplete)
 router.get('/:id/feedback', authenticate, validate(enrollmentIdParamSchema, 'params'), controller.getEnrollmentFeedback)
 router.patch('/:id/feedback', authenticate, validate(enrollmentIdParamSchema, 'params'), validate(feedbackSchema), controller.submitEnrollmentFeedback)
+
+// MODULE 12 — certificate get-or-create for a single enrollment
+// (trainee → idempotent issuance; trainer/admin → read-only existing).
+router.get('/:id/certificate', authenticate, validate(enrollmentIdParamSchema, 'params'), certificateController.getEnrollmentCertificate)
 
 export default router

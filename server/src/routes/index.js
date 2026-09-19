@@ -5,9 +5,10 @@ import userRoutes from './user.routes.js'
 import courseRoutes from './course.routes.js'
 import enrollmentRoutes from './enrollment.routes.js'
 import assessmentRoutes from './assessment.routes.js'
+import certificateRoutes from './certificate.routes.js'
 
 // Future API namespaces (later modules) will mount here:
-// /feedback /certificates /broadcasts /notifications
+// /broadcasts /notifications
 // /competency /storage
 // They are intentionally not registered until implemented.
 
@@ -19,5 +20,6 @@ router.use('/users', userRoutes)
 router.use('/courses', courseRoutes)
 router.use('/enrollments', enrollmentRoutes)
 router.use('/enrollments', assessmentRoutes)
+router.use('/certificates', certificateRoutes)
 
 export default router

@@ -1,12 +1,61 @@
-import { Award, CheckCircle2, Download, FileText, ShieldCheck } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Award, CheckCircle2, Download, FileText, RefreshCw, ShieldCheck } from 'lucide-react'
 import { Button, Card, Badge } from '../../common/ui'
 import { exportCertificatePDF } from '../../../utils/pdfExport'
+import { getEnrollmentCertificate } from '../../../services/certificateApi.js'
 
-export default function CertificateView({ course, enrollment, user }) {
-  const cert = enrollment?.certificate
-  const assessment = enrollment?.assessment
+function formatDate(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
 
-  if (!cert) {
+export default function CertificateView({ course, enrollmentId }) {
+  const [request, setRequest] = useState({ enrollmentId: null, loading: true, cert: null, error: null })
+
+  useEffect(() => {
+    if (!enrollmentId) return undefined
+    let cancelled = false
+    getEnrollmentCertificate(enrollmentId)
+      .then((cert) => {
+        if (!cancelled) setRequest({ enrollmentId, loading: false, cert, error: null })
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setRequest({
+            enrollmentId,
+            loading: false,
+            cert: null,
+            error: err?.message || 'No certificate available yet.',
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [enrollmentId])
+
+  const loading = !enrollmentId ? false : request.enrollmentId !== enrollmentId || request.loading
+  const data = request.enrollmentId === enrollmentId ? request.cert : null
+  const error = request.enrollmentId === enrollmentId ? request.error : null
+
+  const retry = () => {
+    if (!enrollmentId) return
+    setRequest((prev) => ({ ...prev, loading: true, error: null }))
+    getEnrollmentCertificate(enrollmentId)
+      .then((cert) => setRequest({ enrollmentId, loading: false, cert, error: null }))
+      .catch((err) => {
+        setRequest({
+          enrollmentId,
+          loading: false,
+          cert: null,
+          error: err?.message || 'No certificate available yet.',
+        })
+      })
+  }
+
+  if (!enrollmentId) {
     return (
       <Card className="p-8 text-center">
         <p className="text-sm text-slate-body">No certificate available yet. Complete the feedback to unlock it.</p>
@@ -14,14 +63,57 @@ export default function CertificateView({ course, enrollment, user }) {
     )
   }
 
+  if (loading) {
+    return (
+      <Card className="p-8">
+        <div className="mx-auto max-w-sm text-center">
+          <RefreshCw size={22} className="mx-auto animate-spin text-primary" />
+          <h3 className="mt-4 text-lg font-semibold text-primary-deep">Retrieving your certificate…</h3>
+          <p className="mt-1 text-sm text-slate-body">Fetching your verified certificate from the platform.</p>
+        </div>
+      </Card>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <Card className="p-8">
+        <div className="mx-auto max-w-sm text-center">
+          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-sky-light text-primary"><Award size={26} /></span>
+          <h3 className="mt-4 text-lg font-semibold text-primary-deep">Certificate not available</h3>
+          <p className="mt-1 text-sm text-slate-body">{error || 'No certificate has been issued for this enrollment yet.'}</p>
+          <button
+            onClick={retry}
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+          >
+            <RefreshCw size={14} /> Try Again
+          </button>
+        </div>
+      </Card>
+    )
+  }
+
+  const cert = data.certificate || {}
+  const trainee = data.trainee || {}
+  const courseInfo = data.course || {}
+  const assessment = data.assessment || {}
+  const verification = data.verification || {}
+
+  const certificateNumber = cert.certificateNumber || cert.id
+  const traineeName = trainee.name || 'Trainee'
+  const courseName = courseInfo.title || course?.title || 'Course'
+  const courseDomain = courseInfo.domain || course?.domain || ''
+  const issuedOn = cert.issuedOn
+  const percentage = assessment.percentage ?? null
+
   const handleExport = () => {
     exportCertificatePDF({
-      traineeName: user?.name || 'Trainee',
-      courseName: course.title,
-      completionDate: cert.issuedOn,
-      certId: cert.id,
-      trainer: course.trainer,
-      score: assessment?.percentage || 82,
+      traineeName,
+      courseName,
+      completionDate: issuedOn,
+      certId: certificateNumber,
+      trainer: course?.trainer || '',
+      score: percentage ?? 0,
     })
   }
 
@@ -38,7 +130,7 @@ export default function CertificateView({ course, enrollment, user }) {
             </div>
           </div>
           <div className="flex gap-2">
-            <Badge tone="green"><CheckCircle2 size={13} /> Verified</Badge>
+            <Badge tone="green"><CheckCircle2 size={13} /> {verification.issuer || 'Verified'}</Badge>
             <Button onClick={handleExport} variant="secondary"><Download size={16} /> Export PDF</Button>
           </div>
         </div>
@@ -69,25 +161,25 @@ export default function CertificateView({ course, enrollment, user }) {
             <p className="mt-2 text-xs uppercase tracking-widest text-slate-muted">of scientific capacity & training readiness</p>
 
             <div className="mx-auto mt-6 border-b-2 border-border-soft sm:w-80">
-              <p className="pb-2 text-3xl font-serif font-semibold text-primary-deep">{user?.name || 'Trainee'}</p>
+              <p className="pb-2 text-3xl font-serif font-semibold text-primary-deep">{traineeName}</p>
             </div>
 
             <p className="mt-6 text-sm text-slate-body">has successfully completed the verified program</p>
-            <p className="mt-2 text-xl font-semibold text-primary-deep">{course.title}</p>
-            <p className="mt-2 text-xs text-slate-muted">Scientific domain: {course.domain}</p>
+            <p className="mt-2 text-xl font-semibold text-primary-deep">{courseName}</p>
+            {courseDomain && <p className="mt-2 text-xs text-slate-muted">Scientific domain: {courseDomain}</p>}
 
             <div className="mt-6 flex items-center justify-center gap-2">
-              <Badge tone="green"><CheckCircle2 size={13} /> Final Assessment Score: {assessment?.percentage || 82}%</Badge>
+              <Badge tone="green"><CheckCircle2 size={13} /> Final Assessment Score: {percentage != null ? `${percentage}%` : '—'}</Badge>
             </div>
 
             <div className="mx-auto mt-8 grid max-w-md grid-cols-2 gap-6">
               <div>
                 <p className="text-xs text-slate-muted">Certificate ID</p>
-                <p className="text-sm font-semibold text-primary-deep">{cert.id}</p>
+                <p className="text-sm font-semibold text-primary-deep">{certificateNumber}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-muted">Issue Date</p>
-                <p className="text-sm font-semibold text-primary-deep">{cert.issuedOn}</p>
+                <p className="text-sm font-semibold text-primary-deep">{formatDate(issuedOn)}</p>
               </div>
             </div>
           </div>
@@ -96,7 +188,7 @@ export default function CertificateView({ course, enrollment, user }) {
           <div className="relative mt-10 flex items-end justify-between">
             <div className="text-left">
               <div className="w-40 border-t border-slate-body pt-1.5">
-                <p className="text-xs text-slate-body">{course.trainer}</p>
+                <p className="text-xs text-slate-body">{course?.trainer || '—'}</p>
                 <p className="text-[10px] text-slate-muted">Course Trainer</p>
               </div>
             </div>
@@ -113,7 +205,7 @@ export default function CertificateView({ course, enrollment, user }) {
       <Card className="p-4">
         <p className="flex items-center gap-2 text-sm text-slate-body">
           <FileText size={16} className="text-primary" />
-          This certificate has been added to your profile and competency record. Use the Export PDF button to save or print it.
+          Certificate {certificateNumber} is issued by {verification.issuer || 'Capacity Connect'}. This certificate has been added to your profile and competency record. Use the Export PDF button to save or print it.
         </p>
       </Card>
     </div>
