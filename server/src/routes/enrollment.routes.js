@@ -14,14 +14,24 @@ import {
   createEnrollmentSchema,
   updateEnrollmentSchema,
   enrollmentIdParamSchema,
+  completeSectionSchema,
+  feedbackSchema,
 } from '../validators/enrollment.validator.js'
 
 const router = Router()
 
+// MODULE 11 ordering note: `/analytics/feedback` MUST be registered BEFORE
+// `/:id/feedback` — otherwise Express would match "analytics" as `:id`.
+router.get('/analytics/feedback', authenticate, controller.getTrainerFeedbackAnalytics)
 router.get('/', authenticate, controller.listEnrollments)
 router.post('/', authenticate, validate(createEnrollmentSchema), controller.enroll)
 router.get('/:id', authenticate, validate(enrollmentIdParamSchema, 'params'), controller.getEnrollment)
 router.get('/:id/workspace', authenticate, validate(enrollmentIdParamSchema, 'params'), controller.getWorkspace)
 router.patch('/:id', authenticate, validate(enrollmentIdParamSchema, 'params'), validate(updateEnrollmentSchema), controller.updateEnrollment)
+
+// MODULE 11 — authoritative progression + feedback.
+router.post('/:id/progress', authenticate, validate(enrollmentIdParamSchema, 'params'), validate(completeSectionSchema), controller.markSectionComplete)
+router.get('/:id/feedback', authenticate, validate(enrollmentIdParamSchema, 'params'), controller.getEnrollmentFeedback)
+router.patch('/:id/feedback', authenticate, validate(enrollmentIdParamSchema, 'params'), validate(feedbackSchema), controller.submitEnrollmentFeedback)
 
 export default router

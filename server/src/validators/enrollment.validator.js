@@ -23,6 +23,32 @@ export const createEnrollmentSchema = z.object({
   courseId: uuid('Course id'),
 })
 
+// Module 11 — section completion payload. The service owns every other decision
+// (that the section exists for this course, that the ordering gate passes, and
+// that the resulting progress/completion is derived server-side).
+export const completeSectionSchema = z
+  .object({
+    sectionId: uuid('Section id'),
+  })
+  .strict('Only sectionId is accepted when completing a section.')
+
+// Module 11 — feedback payload. The three rating keys are the FROZEN 1–5 scale
+// the product uses (Study Notes→Practice are all optional feedback surfaces for
+// trainers; every factor must be supplied). Suggestions are an optional free
+// text capped at 2 000 characters.
+export const feedbackSchema = z
+  .object({
+    contentDepth: z.number().int('contentDepth must be an integer.').min(1, 'Rate 1 to 5.').max(5, 'Rate 1 to 5.'),
+    trainerDelivery: z.number().int('trainerDelivery must be an integer.').min(1, 'Rate 1 to 5.').max(5, 'Rate 1 to 5.'),
+    operationalRelevance: z
+      .number()
+      .int('operationalRelevance must be an integer.')
+      .min(1, 'Rate 1 to 5.')
+      .max(5, 'Rate 1 to 5.'),
+    suggestions: z.string().trim().max(2000, 'Suggestions cannot exceed 2000 characters.').optional(),
+  })
+  .strict('Only contentDepth, trainerDelivery, operationalRelevance and suggestions are accepted.')
+
 // Only progression fields are writable. `started_at` and `completed_at` must be
 // ISO-8601 timestamps; `progress` is a 0–100 integer; `status` is one of the
 // four frozen statuses Edition.

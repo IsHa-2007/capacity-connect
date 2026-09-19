@@ -24,6 +24,7 @@ import * as assessmentRepo from '../repositories/assessment.repository.js'
 import * as enrollmentRepo from '../repositories/enrollment.repository.js'
 import { findCourseById, listQuestionsForCourse } from '../repositories/course.repository.js'
 import { ROLE_TRAINEE, ROLE_TRAINER, ROLE_ADMIN, isApproved } from '../lib/roles.js'
+import { finalizeCompletion as finalizeEnrollmentCompletion } from './enrollment.service.js'
 
 // Existing product definition (src/utils/examGenerator.js): assessment size,
 // time limit, negative marking and pass threshold are reused verbatim, not
@@ -309,6 +310,19 @@ export async function submitAssessment(actor, enrollmentId, attemptId, input) {
     throw summaryError
   }
 
+  // MODULE 11 INTEGRATION: after a passed attempt persists, let the enrollment
+  // service re-run its authoritative completion decision. If the materials were
+  // already complete the enrollment legitimately turns COMPLETED right now —
+  // never at a client-supplied timestamp, always at the server's. Best effort:
+  // an attempt already succeeded; a completion write failure must not fail it.
+  let finalizedEnrollment = enrollmentSummary
+  try {
+    const finalized = await finalizeEnrollmentCompletion(actor, enrollmentId)
+    if (finalized) finalizedEnrollment = finalized
+  } catch {
+    // best-effort — never fail a successful attempt because completion write erred
+  }
+
   return {
     attempt: {
       id: submitted.id,
@@ -324,7 +338,7 @@ export async function submitAssessment(actor, enrollmentId, attemptId, input) {
       attemptedAt: submitted.attemptedAt,
       createdAt: submitted.createdAt,
     },
-    enrollment: enrollmentSummary,
+    enrollment: finalizedEnrollment,
   }
 }
 

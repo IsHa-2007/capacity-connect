@@ -52,3 +52,33 @@ export async function updateEnrollment(req, res, next) {
     return sendSuccess(res, await enrollmentService.updateEnrollment(actor, req.params.id, req.body))
   } catch (err) { return next(err) }
 }
+
+// Module 11 — SECTION COMPLETION / FEEDBACK / ANALYTICS (thin adapters only).
+
+export async function markSectionComplete(req, res, next) {
+  try {
+    const actor = await hydrateActor(req)
+    return sendSuccess(res, await enrollmentService.completeSection(actor, req.params.id, req.body))
+  } catch (err) { return next(err) }
+}
+
+export async function submitEnrollmentFeedback(req, res, next) {
+  try {
+    const actor = await hydrateActor(req)
+    return sendSuccess(res, await enrollmentService.submitFeedback(actor, req.params.id, req.body))
+  } catch (err) { return next(err) }
+}
+
+export async function getEnrollmentFeedback(req, res, next) {
+  try {
+    const actor = await hydrateActor(req)
+    return sendSuccess(res, await enrollmentService.getFeedback(actor, req.params.id))
+  } catch (err) { return next(err) }
+}
+
+export async function getTrainerFeedbackAnalytics(req, res, next) {
+  try {
+    const actor = await hydrateActor(req)
+    return sendSuccess(res, await enrollmentService.getTrainerFeedbackAnalytics(actor))
+  } catch (err) { return next(err) }
+}

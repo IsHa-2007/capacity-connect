@@ -233,6 +233,26 @@ export async function updateEnrollmentRow(id, patch) {
   return mapEnrollmentRow(data)
 }
 
+// Module 11 — feedback write. Only the feedback_* columns can ever be touched
+// by this operation (the row's identity/progression columns are frozen here).
+export async function updateEnrollmentFeedbackRow(id, input) {
+  const out = {}
+  if (input.contentDepth !== undefined) out.feedback_content_depth = input.contentDepth
+  if (input.trainerDelivery !== undefined) out.feedback_trainer_delivery = input.trainerDelivery
+  if (input.operationalRelevance !== undefined) out.feedback_operational_relevance = input.operationalRelevance
+  if (input.suggestions !== undefined) out.feedback_suggestions = input.suggestions
+  if (Object.keys(out).length === 0) return null
+
+  const { data, error } = await supabaseAdmin
+    .from('enrollments')
+    .update(out)
+    .eq('id', id)
+    .select(ENROLLMENTS_FULL)
+    .maybeSingle()
+  if (error) throw asEnrollmentError('update:feedback', error)
+  return mapEnrollmentRow(data)
+}
+
 // ---------------------------------------------------------------------------
 // WORKSPACE BUILD BLOCKS
 // ---------------------------------------------------------------------------

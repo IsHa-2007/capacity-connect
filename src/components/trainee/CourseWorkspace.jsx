@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   AlertCircle,
@@ -19,6 +19,7 @@ import {
 import { useAuth } from '../../context/AuthContext'
 import { useCourses } from '../../context/CourseContext'
 import { Card, Badge } from '../common/ui'
+import * as enrollmentApi from '../../services/enrollmentApi.js'
 import NotesSection from './workspace/NotesSection'
 import PPTSection from './workspace/PPTSection'
 import VideoSection from './workspace/VideoSection'
@@ -40,36 +41,153 @@ const BASE_TABS = [
   { key: 'certificate', label: 'Certificate', icon: Award },
 ]
 
-const progressByTab = { overview: 5, notes: 15, slides: 30, video: 45, practice: 60, assessment: 75, feedback: 88, certificate: 100 }
+// Backend section_type -> workspace tab key (Module 11 section plan).
+const SECTION_TAB_KEY = { NOTES: 'notes', SLIDES: 'slides', VIDEOS: 'video', PRACTICE: 'practice' }
 
-function contentOf(course) {
+// Backend "material" rows ({ id, type, mimeType, fileSize, originalFilename,
+// signedUrl }) => the shape the material section components already use.
+function toUiMaterial(m) {
+  const name = m.originalFilename || m.originalName || 'Material'
   return {
-    notes: Array.isArray(course?.notes) ? course.notes : [],
-    slides: Array.isArray(course?.slides) ? course.slides : [],
-    videos: Array.isArray(course?.videos) ? course.videos : [],
-    practice: Array.isArray(course?.practice) ? course.practice : [],
+    id: m.id,
+    name,
+    title: name,
+    fileType: m.mimeType || m.type,
+    type: m.type,
+    size: m.fileSize,
+    fileURL: m.signedUrl || null,
   }
+}
+
+function hasSubmittedFeedback(feedback) {
+  return Boolean(
+    feedback &&
+      (feedback.contentDepth != null ||
+        feedback.trainerDelivery != null ||
+        feedback.operationalRelevance != null ||
+        feedback.suggestions != null),
+  )
 }
 
 export default function CourseWorkspace() {
   const { courseId } = useParams()
   const navigate = useNavigate()
   const { currentUser } = useAuth()
-  const { courseCatalog, courseById, getEnrollment, updateEnrollment, recordCompetency } = useCourses()
+  const { courseCatalog, courseById } = useCourses()
   const [activeTab, setActiveTab] = useState('overview')
   const [showFeedback, setShowFeedback] = useState(false)
   const [assessmentNotice, setAssessmentNotice] = useState(false)
+  const [notice, setNotice] = useState(null)
+  const [enrollments, setEnrollments] = useState(null) // null = still loading
+  const [loadingWorkspace, setLoadingWorkspace] = useState(false)
 
-  const enrolledCourses = courseCatalog.filter((c) => getEnrollment(c.id))
+  // The enrolled-courses list is backend-driven — the backend enrollment rows
+  // are the single source for how much of each course has been completed.
+  useEffect(() => {
+    let cancelled = false
+    enrollmentApi
+      .listEnrollments()
+      .then((rows) => {
+        if (!cancelled) setEnrollments(Array.isArray(rows) ? rows : [])
+      })
+      .catch(() => {
+        if (!cancelled) setEnrollments([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const enrollmentsLoaded = enrollments !== null
+  const enrollmentRow = courseId && enrollments ? enrollments.find((e) => String(e.courseId) === String(courseId)) : null
+  const enrollmentId = enrollmentRow?.id || null
+  // Workspace cache is keyed by enrollment id so switching between courses
+  // never flashes another course's stale state.
+  const [workspaces, setWorkspaces] = useState({})
+  const workspace = enrollmentId ? workspaces[enrollmentId] || null : null
+
+  // Load the authoritative workspace once the enrollment is known.
+  useEffect(() => {
+    if (!courseId || !enrollmentsLoaded || !enrollmentId) return
+    let cancelled = false
+    setLoadingWorkspace(true)
+    enrollmentApi
+      .getWorkspace(enrollmentId)
+      .then((ws) => {
+        if (!cancelled) setWorkspaces((prev) => (prev[enrollmentId] === ws ? prev : { ...prev, [enrollmentId]: ws }))
+      })
+      .catch((err) => {
+        if (!cancelled) setNotice(err?.message || 'Could not load the workspace.')
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingWorkspace(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [courseId, enrollmentsLoaded, enrollmentId])
+
+  const refreshWorkspace = async () => {
+    if (!enrollmentId) return
+    try {
+      const ws = await enrollmentApi.getWorkspace(enrollmentId)
+      setWorkspaces((prev) => ({ ...prev, [enrollmentId]: ws }))
+      setEnrollments((prev) =>
+        Array.isArray(prev)
+          ? prev.map((e) => (String(e.id) === String(enrollmentId) ? ws.enrollment : e))
+          : prev,
+      )
+      return ws
+    } catch (err) {
+      setNotice(err?.message || 'Could not refresh your progress.')
+      return null
+    }
+  }
 
   // No courseId selected → show the enrolled-courses card list.
   if (!courseId) {
-    const withProgress = enrolledCourses.map((c) => ({ ...c, _progress: getEnrollment(c.id)?.progress || 0 }))
-    return <EnrolledCourses enrolledCourses={withProgress} navigate={navigate} />
+    const enrolledCourses = courseCatalog
+      .filter((c) => enrollmentsLoaded && enrollments.some((e) => String(e.courseId) === String(c.id)))
+      .map((c) => {
+        const row = enrollments.find((e) => String(e.courseId) === String(c.id))
+        return { ...c, _progress: row?.progress || 0 }
+      })
+    return (
+      <EnrolledCourses
+        enrolledCourses={enrolledCourses}
+        navigate={navigate}
+        loading={!enrollmentsLoaded}
+      />
+    )
   }
 
   const activeCourse = courseById(courseId)
   if (!activeCourse) {
+    return <Card className="p-8">
+      <div className="mx-auto max-w-sm text-center">
+        <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-sky-light text-primary"><BookOpen size={26} /></span>
+        <h3 className="mt-4 text-lg font-semibold text-primary-deep">Course not found</h3>
+        <p className="mt-1 text-sm text-slate-body">This course could not be found or you are not enrolled in it.</p>
+        <button onClick={() => navigate('/trainee/workspace')} className="mt-4 text-sm font-medium text-primary hover:underline">Back to My Courses →</button>
+      </div>
+    </Card>
+  }
+
+  // The enrolled view is fully backend-driven: while the enrollment is still
+  // being resolved (or the workspace is still loading) show a lightweight state.
+  if (!enrollmentsLoaded || (enrollmentId && loadingWorkspace && !workspace)) {
+    return (
+      <Card className="p-8">
+        <div className="mx-auto max-w-sm text-center">
+          <RefreshCw size={22} className="mx-auto animate-spin text-primary" />
+          <h3 className="mt-4 text-lg font-semibold text-primary-deep">Loading your workspace…</h3>
+          <p className="mt-1 text-sm text-slate-body">Syncing your progress from the platform.</p>
+        </div>
+      </Card>
+    )
+  }
+
+  if (!enrollmentRow || !workspace) {
     return (
       <Card className="p-8">
         <div className="mx-auto max-w-sm text-center">
@@ -82,10 +200,20 @@ export default function CourseWorkspace() {
     )
   }
 
-  const enrollment = getEnrollment(activeCourse.id)
-  const en = enrollment
-  const course = activeCourse
-  const content = contentOf(course)
+  const course = workspace.course || activeCourse
+  const en = workspace.enrollment
+  const materials = workspace.materials || { notes: [], slides: [], videos: [], practice: [] }
+  const progressValue = workspace.progress?.value ?? en?.progress ?? 0
+  const sectionPlan = workspace.progress?.sectionPlan || []
+
+  const content = {
+    notes: (materials.notes || []).map(toUiMaterial),
+    slides: (materials.slides || []).map(toUiMaterial),
+    videos: (materials.videos || []).map(toUiMaterial),
+    practice: (materials.practice || []).map(toUiMaterial),
+  }
+  // The material sections read `course.<key>`; give them the backend materials.
+  const contentCourse = { ...course, notes: content.notes, slides: content.slides, videos: content.videos, practice: content.practice }
 
   // Material tabs are shown only when the course actually has content in that
   // section. Overview, Assessment, Feedback and Certificate are always present.
@@ -96,10 +224,10 @@ export default function CourseWorkspace() {
   // Locking (Requirement: only Assessment and Certificate carry progression gates.
   // Study-material sections are always accessible when present. Feedback unlocks
   // only after the final assessment has been passed.)
-  const hasEngaged = Boolean(en && en.progress && en.progress > 0)
+  const hasEngaged = progressValue > 0
   const assessmentLocked = hasAnyMaterial ? !hasEngaged : false
-  const feedbackLocked = !Boolean(en?.assessment?.passed)
-  const certificateLocked = !(en?.assessment?.passed && en?.feedback)
+  const feedbackLocked = !en?.assessment?.passed
+  const certificateLocked = !(en?.assessment?.passed && hasSubmittedFeedback(workspace.feedback))
 
   const isTabLocked = (key) => {
     if (key === 'assessment') return assessmentLocked
@@ -121,12 +249,25 @@ export default function CourseWorkspace() {
     }
   }
 
-  const completeStep = (flag, nextProgress) => {
-    if (!en) return
-    updateEnrollment(course.id, {
-      [flag]: true,
-      progress: Math.max(en.progress || 0, nextProgress),
-    })
+  // Section completion routes through the backend's authoritative ordered gate
+  // (POST /enrollments/:id/progress). Each section step of the current tab is
+  // marked in order; any `ordered` block is surfaced as a message and the
+  // workspace is refreshed so the UI always reflects server state.
+  const completeStep = async (key) => {
+    if (!enrollmentId) return
+    const steps = sectionPlan.filter((s) => SECTION_TAB_KEY[s.sectionType] === key)
+    if (!steps.length) return
+    setNotice(null)
+    for (const step of steps) {
+      try {
+        await enrollmentApi.markSectionComplete(enrollmentId, step.sectionId)
+        await refreshWorkspace()
+      } catch (err) {
+        await refreshWorkspace()
+        setNotice(err?.message || 'Your progress could not be updated right now.')
+        break
+      }
+    }
   }
 
   const renderTab = () => {
@@ -136,61 +277,54 @@ export default function CourseWorkspace() {
       case 'notes':
         return (
           <NotesSection
-            course={course}
+            course={contentCourse}
             done={en?.notesDone}
-            onComplete={() => completeStep('notesDone', progressByTab.slides)}
+            onComplete={() => completeStep('notes')}
           />
         )
       case 'slides':
         return (
           <PPTSection
-            course={course}
+            course={contentCourse}
             done={en?.slidesDone}
-            onComplete={() => completeStep('slidesDone', progressByTab.video)}
+            onComplete={() => completeStep('slides')}
           />
         )
       case 'video':
         return (
           <VideoSection
-            course={course}
+            course={contentCourse}
             done={en?.videoDone}
-            onComplete={() => completeStep('videoDone', progressByTab.practice)}
+            onComplete={() => completeStep('video')}
           />
         )
       case 'practice':
         return (
           <PracticeSection
-            course={course}
+            course={contentCourse}
             done={en?.practiceDone}
-            onComplete={() => completeStep('practiceDone', progressByTab.assessment)}
+            onComplete={() => completeStep('practice')}
             onProceedToAssessment={handleProceedToAssessment}
           />
         )
       case 'assessment':
         return (
           <QuizEngine
-            course={course}
+            enrollmentId={enrollmentId}
             existing={en?.assessment}
-            onPass={(res) => {
-              updateEnrollment(course.id, {
-                assessment: res,
-                progress: 75,
-                attempts: (en?.attempts || 0) + 1,
-              })
+            onPass={() => {
+              refreshWorkspace()
+              setActiveTab('feedback')
             }}
-            onFail={(res) => {
-              updateEnrollment(course.id, {
-                assessment: res,
-                progress: 75,
-                attempts: (en?.attempts || 0) + 1,
-              })
+            onFail={() => {
+              refreshWorkspace()
             }}
           />
         )
       case 'feedback':
         return (
           <FeedbackPanel
-            submitted={en?.feedback}
+            submitted={hasSubmittedFeedback(workspace.feedback)}
             canUnlock={Boolean(en?.assessment?.passed)}
             onOpenModal={() => setShowFeedback(true)}
           />
@@ -218,7 +352,7 @@ export default function CourseWorkspace() {
             <h2 className="mt-2 text-2xl font-semibold text-primary-deep">{course.title}</h2>
           </div>
           <div className="flex items-center gap-2 text-sm text-slate-muted">
-            <RefreshCw size={15} /> Progress: <Badge tone="blue">{Math.round(en?.progress || 0)}%</Badge>
+            <RefreshCw size={15} /> Progress: <Badge tone="blue">{Math.round(progressValue)}%</Badge>
           </div>
         </div>
       </div>
@@ -235,31 +369,29 @@ export default function CourseWorkspace() {
         </div>
       )}
 
+      {notice && (
+        <div className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          <AlertCircle size={16} className="shrink-0 text-rose-600" />
+          <p className="flex-1">{notice}</p>
+          <button onClick={() => setNotice(null)} className="text-xs font-medium text-rose-600 hover:underline">Dismiss</button>
+        </div>
+      )}
+
       {renderTab()}
 
       <FeedbackModal
         open={showFeedback}
         onClose={() => setShowFeedback(false)}
         course={course}
-        onSubmitted={(feedback) => {
-          updateEnrollment(course.id, {
-            feedback,
-            certificate:
-              en?.assessment?.passed
-                ? {
-                    id: en?.certificate?.id || `CC-2026-${String(4821 + course.id.length).padStart(6, '0')}`,
-                    issuedOn: new Date().toISOString().slice(0, 10),
-                  }
-                : en?.certificate || null,
-            progress: en?.assessment?.passed ? 100 : progressByTab.feedback,
-            stage: 'certificate',
-            status: en?.assessment?.passed ? 'completed' : en?.status,
-          })
-          if (en?.assessment?.passed) {
-            recordCompetency(course.id, en?.assessment?.percentage || 0)
-            setActiveTab('certificate')
-          }
+        onSubmitted={async (feedback) => {
           setShowFeedback(false)
+          try {
+            await enrollmentApi.submitFeedback(enrollmentId, feedback)
+            await refreshWorkspace()
+            setActiveTab('certificate')
+          } catch (err) {
+            setNotice(err?.message || 'Your feedback could not be submitted.')
+          }
         }}
       />
     </div>
@@ -412,7 +544,19 @@ function FeedbackPanel({ submitted, canUnlock, onOpenModal }) {
   )
 }
 
-function EnrolledCourses({ enrolledCourses, navigate }) {
+function EnrolledCourses({ enrolledCourses, navigate, loading = false }) {
+  if (loading) {
+    return (
+      <Card className="p-8">
+        <div className="mx-auto max-w-sm text-center">
+          <RefreshCw size={22} className="mx-auto animate-spin text-primary" />
+          <h3 className="mt-4 text-lg font-semibold text-primary-deep">Loading your courses…</h3>
+          <p className="mt-1 text-sm text-slate-body">Syncing your enrollments from the platform.</p>
+        </div>
+      </Card>
+    )
+  }
+
   if (!enrolledCourses.length) {
     return (
       <Card className="p-8">

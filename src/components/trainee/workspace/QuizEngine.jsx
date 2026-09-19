@@ -11,28 +11,39 @@ import {
   XCircle,
 } from 'lucide-react'
 import { Card, Badge, Button } from '../../common/ui'
-import { generateAssessment, scoreAssessment } from '../../../utils/examGenerator'
+import { startAssessment, submitAssessment } from '../../../services/assessmentApi.js'
 
 const ASSESSMENT_TIME_SECONDS = 20 * 60 // 20 minutes
 
-export default function QuizEngine({ course, existing, onPass, onFail }) {
-  const bank = course.bank || []
+export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
   const [phase, setPhase] = useState('intro') // intro | running | result
   const [assessment, setAssessment] = useState(null)
+  const [attemptId, setAttemptId] = useState(null)
+  const [result, setResult] = useState(null)
   const [answers, setAnswers] = useState([])
   const [current, setCurrent] = useState(0)
   const [confirmSubmit, setConfirmSubmit] = useState(false)
   const [timeLeft, setTimeLeft] = useState(ASSESSMENT_TIME_SECONDS)
+  const [startError, setStartError] = useState('')
   const timerRef = useRef(null)
 
   // The lock gate is managed by the parent workspace.
-  const start = () => {
-    const gen = generateAssessment(bank, 20)
-    setAssessment(gen)
-    setAnswers(Array(gen.questions.length).fill(null))
-    setCurrent(0)
-    setTimeLeft(ASSESSMENT_TIME_SECONDS)
-    setPhase('running')
+  const start = async () => {
+    setStartError('')
+    try {
+      const attempt = await startAssessment(enrollmentId)
+      setAttemptId(attempt.attemptId)
+      setAssessment({
+        questions: attempt.questions,
+        timeLimitSeconds: attempt.timeLimitSeconds ?? ASSESSMENT_TIME_SECONDS,
+      })
+      setAnswers(Array(attempt.questions.length).fill(null))
+      setCurrent(0)
+      setTimeLeft(attempt.timeLimitSeconds ?? ASSESSMENT_TIME_SECONDS)
+      setPhase('running')
+    } catch (err) {
+      setStartError(err?.message || 'The assessment could not be started.')
+    }
   }
 
   useEffect(() => {
@@ -51,12 +62,33 @@ export default function QuizEngine({ course, existing, onPass, onFail }) {
     })
   }
 
-  const submit = () => {
+  const submit = async () => {
     clearInterval(timerRef.current)
-    const result = scoreAssessment(answers, assessment.questions)
-    setPhase('result')
-    if (result.passed) onPass(result)
-    else onFail(result)
+    if (!assessment || !attemptId) return
+    const answersPayload = assessment.questions
+      .map((q, i) => ({ questionId: q.id, optionIndex: answers[i] }))
+    const elapsed = ASSESSMENT_TIME_SECONDS - Math.max(0, timeLeft)
+    try {
+      const res = await submitAssessment(enrollmentId, attemptId, {
+        answers: answersPayload,
+        timeSpentSeconds: elapsed,
+      })
+      const attempt = res.attempt
+      const mapped = {
+        correct: attempt.correctCount,
+        incorrect: attempt.incorrectCount,
+        unattempted: attempt.unattemptedCount,
+        rawScore: attempt.rawScore,
+        percentage: attempt.percentage,
+        passed: attempt.passed,
+      }
+      setResult(mapped)
+      setPhase('result')
+      if (mapped.passed) onPass(mapped)
+      else onFail(mapped)
+    } catch (err) {
+      setStartError(err?.message || 'The assessment could not be submitted.')
+    }
   }
 
   useEffect(() => {
@@ -69,24 +101,20 @@ export default function QuizEngine({ course, existing, onPass, onFail }) {
 
   const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
-  if (existing && phase === 'result') {
-    // already attempted -> show stored result
-    return <ResultView result={existing} course={course} onRetry={onFail} />
-  }
-
   if (phase === 'intro') {
-    return <IntroView onStart={start} />
+    return <IntroView onStart={start} error={startError} existing={existing} />
   }
 
-  if (phase === 'result' && assessment) {
+  if (phase === 'result' && result) {
     return (
       <ResultCard
-        result={scoreAssessment(answers, assessment.questions)}
+        result={result}
         onRetry={() => {
-          setAssessment(null)
+          setResult(null)
+          setAttemptId(null)
           setPhase('intro')
         }}
-        onDone={onPass}
+        onDone={result.passed ? onPass : undefined}
       />
     )
   }
@@ -96,6 +124,7 @@ export default function QuizEngine({ course, existing, onPass, onFail }) {
   const q = assessment.questions[current]
   const answered = answers.filter((a) => a !== null).length
   const progressPct = (answered / assessment.questions.length) * 100
+  const qDifficulty = String(q.difficulty || '').toLowerCase()
 
   return (
     <div className="space-y-4">
@@ -106,7 +135,7 @@ export default function QuizEngine({ course, existing, onPass, onFail }) {
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-sky-light text-primary"><FileCheck size={18} /></span>
             <div>
               <h3 className="font-semibold text-primary-deep">Final Assessment</h3>
-              <p className="text-xs text-slate-muted">{course.title}</p>
+              <p className="text-xs text-slate-muted">Server-generated question set</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -125,8 +154,8 @@ export default function QuizEngine({ course, existing, onPass, onFail }) {
       <Card className="p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Badge tone={q.difficulty === 'easy' ? 'green' : q.difficulty === 'medium' ? 'amber' : 'navy'}>{q.difficulty}</Badge>
-            <span className="text-xs text-slate-muted">{q.tag?.text}</span>
+            <Badge tone={qDifficulty === 'easy' ? 'green' : qDifficulty === 'medium' ? 'amber' : 'navy'}>{qDifficulty || 'hard'}</Badge>
+            <span className="text-xs text-slate-muted">{q.tagLabel || q.tag?.text}</span>
           </div>
           <span className="text-xs text-slate-muted">Question {current + 1} of {assessment.questions.length}</span>
         </div>
@@ -190,6 +219,9 @@ export default function QuizEngine({ course, existing, onPass, onFail }) {
             </Button>
           </div>
         </div>
+        {startError && (
+          <p className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{startError}</p>
+        )}
       </Card>
 
       {/* Confirm modal */}
@@ -212,7 +244,7 @@ export default function QuizEngine({ course, existing, onPass, onFail }) {
   )
 }
 
-function IntroView({ onStart }) {
+function IntroView({ onStart, error, existing }) {
   return (
     <Card className="p-8">
       <div className="mx-auto max-w-2xl">
@@ -236,6 +268,19 @@ function IntroView({ onStart }) {
           <p className="mt-1">Once started, the timer cannot be paused. Unanswered questions receive 0 marks. Negative marking applies to incorrect answers.</p>
         </div>
 
+        {existing?.percentage != null && (
+          <div className="mt-6 rounded-xl border border-blue-100 bg-sky-light p-4 text-sm text-primary">
+            <p>
+              Previous attempt: <b>{existing.percentage}%</b>
+              {existing.passed ? ' — passed. You may still retake it.' : ' — not passed. Review and retry.'}
+            </p>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-6 rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>
+        )}
+
         <div className="mt-6 text-center">
           <Button onClick={onStart} size="lg" className="px-6 py-2.5">Begin Assessment</Button>
         </div>
@@ -254,14 +299,6 @@ function RuleCard({ title, lines }) {
         ))}
       </ul>
     </div>
-  )
-}
-
-function ResultView({ result, course, onRetry }) {
-  return (
-    <Card className="p-8">
-      <ResultInner result={result} course={course} onRetry={onRetry} />
-    </Card>
   )
 }
 

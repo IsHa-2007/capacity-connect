@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
@@ -19,6 +20,7 @@ import { useCourses } from '../../context/CourseContext'
 import { useBroadcasts } from '../../context/BroadcastContext'
 import { Card, Button, StatCard, Badge } from '../common/ui'
 import { exportCertificatePDF } from '../../utils/pdfExport'
+import { getTrainerFeedbackAnalytics } from '../../services/enrollmentApi.js'
 
 export default function TrainerHomeView() {
   const navigate = useNavigate()
@@ -26,6 +28,28 @@ export default function TrainerHomeView() {
   const { analytics } = useTrainer()
   const { myCourses, courseCertificates } = useCourses()
   const { broadcasts } = useBroadcasts()
+  const [backendFeedback, setBackendFeedback] = useState(null)
+  const [feedbackError, setFeedbackError] = useState(false)
+
+  // MODULE 11 — trainer feedback analytics come straight from the backend
+  // (aggregations over enrollments for the courses this trainer owns). When the
+  // backend answers we surface its numbers; otherwise we fall back to the
+  // trainer context's current values so the dashboard never goes blank.
+  useEffect(() => {
+    if (currentUser?.role !== 'TRAINER') return
+    let cancelled = false
+    getTrainerFeedbackAnalytics()
+      .then((data) => {
+        if (cancelled) return
+        if (data && typeof data.feedbackCount === 'number') setBackendFeedback(data)
+      })
+      .catch(() => {
+        if (!cancelled) setFeedbackError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [currentUser?.role])
 
   const isPending = currentUser?.status === 'pending'
 
@@ -34,15 +58,21 @@ export default function TrainerHomeView() {
   )
 
   const published = myCourses.filter((c) => c.status === 'published').length
+  const fbCount = backendFeedback?.feedbackCount ?? analytics.feedbackCount
+  const fbRatings =
+    backendFeedback?.feedbackRatings ?? analytics.feedbackRatings
   const avgAll =
-    analytics.feedbackCount > 0
-      ? (
-          (analytics.feedbackRatings.contentDepth +
-            analytics.feedbackRatings.trainerDelivery +
-            analytics.feedbackRatings.operationalRelevance) /
-          (3 * analytics.feedbackCount)
-        ).toFixed(1)
+    fbCount > 0
+      ? backendFeedback
+        ? `${backendFeedback.averageOverall ?? 0} / 5`
+        : (
+            (fbRatings.contentDepth +
+              fbRatings.trainerDelivery +
+              fbRatings.operationalRelevance) /
+            (3 * fbCount)
+          ).toFixed(1)
       : '—'
+  const showFeedbackBreakdown = fbCount > 0 && backendFeedback
 
   return (
     <div className="space-y-8">
@@ -88,8 +118,30 @@ export default function TrainerHomeView() {
         <StatCard icon={Layers} label="Total Courses" value={analytics.courses} sub={`${published} published`} />
         <StatCard icon={Users} label="Active Trainees" value={analytics.activeTrainees} sub="Across all courses" tone="green" />
         <StatCard icon={TrendingUp} label="Avg Assessment" value={analytics.avgAssessment ? `${analytics.avgAssessment}%` : '—'} sub="All assessments" tone="amber" />
-        <StatCard icon={Star} label="Avg Feedback" value={avgAll !== '—' ? `${avgAll} / 5` : '—'} sub={`${analytics.feedbackCount} submissions`} tone="navy" />
+        <StatCard icon={Star} label="Avg Feedback" value={avgAll !== '—' ? `${avgAll}` : '—'} sub={`${fbCount} submissions`} tone="navy" />
       </div>
+
+      {/* MODULE 11 — per-factor feedback averages (backend analytics) */}
+      {showFeedbackBreakdown && (
+        <Card className="p-6">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 font-semibold text-primary-deep">
+              <Star size={18} className="text-primary" /> Trainee Feedback Analytics
+            </h3>
+            <Badge tone="navy">{fbCount} submissions</Badge>
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <FeedbackFactor label="Content Depth" value={fbRatings.contentDepth} />
+            <FeedbackFactor label="Trainer Delivery" value={fbRatings.trainerDelivery} />
+            <FeedbackFactor label="Operational Relevance" value={fbRatings.operationalRelevance} />
+          </div>
+          {feedbackError && (
+            <p className="mt-4 text-xs text-slate-muted">
+              Live feedback analytics are currently unavailable; showing the locally calculated summary.
+            </p>
+          )}
+        </Card>
+      )}
 
       {/* Quick actions */}
       <div>
@@ -222,6 +274,23 @@ function ActionCard({ icon: Icon, title, text, onClick, locked }) {
       <h4 className="mt-3 font-semibold text-primary-deep">{title}</h4>
       <p className="mt-1 text-sm text-slate-muted">{text}</p>
     </Card>
+  )
+}
+
+function FeedbackFactor({ label, value }) {
+  return (
+    <div className="rounded-xl border border-border-subtle bg-sky-soft p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-primary">{label}</p>
+      <p className="mt-1 text-2xl font-semibold text-primary-deep">{value ?? '—'} <span className="text-sm font-normal text-slate-muted">/ 5</span></p>
+      <div className="mt-2 flex gap-0.5">
+        {[1, 2, 3, 4, 5].map((s) => (
+          <span
+            key={s}
+            className={`h-1.5 flex-1 rounded-full ${value >= s ? 'bg-amber-400' : 'bg-[#EAF0F6]'}`}
+          />
+        ))}
+      </div>
+    </div>
   )
 }
 
