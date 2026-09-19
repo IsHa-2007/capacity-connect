@@ -1,9 +1,13 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react'
 import { seedCompetencyRecords, stationRegionMap } from '../data/mockData'
 import { useAuth } from './AuthContext'
 import * as courseService from '../services/courseService'
 import { isFirebaseConfigured } from '../firebase/config'
 import { ownedTrainerIds } from '../utils/trainerOwnership'
+import * as courseApi from '../services/courseApi'
+import * as enrollmentApi from '../services/enrollmentApi'
+import * as certificateApi from '../services/certificateApi'
+import * as userApi from '../services/userApi'
 
 const CourseContext = createContext(null)
 
@@ -14,11 +18,71 @@ export function CourseProvider({ children }) {
   // Initialized from the service's (mock or Firestore) data source.
   const [courses, setCourses] = useState(() => seedCoursesSnapshot())
 
-  // When Firebase is configured, load the real course catalog from Firestore so
-  // React state reflects persisted documents (not just the seed data). This is
-  // what makes a Firestore-created course actually appear in My Courses and the
-  // trainee catalog after the create call resolves.
+  const backendActive = Boolean(currentUser && currentUser.authSource === 'supabase')
+
+  // Load the course catalog for the current user. Real (supabase) users read the
+  // authoritative backend (trainees see only PUBLISHED courses; trainers/admins
+  // see every course they are entitled to). Trainer-owned courses are hydrated
+  // with their sections + question bank so the course-management UI keeps
+  // working against persisted data. The Firestore/mock path is unchanged.
   useEffect(() => {
+    if (!currentUser) return
+    if (backendActive) {
+      let active = true
+      setCourses([])
+      ;(async () => {
+        try {
+          const queries = currentUser.role === 'TRAINEE' ? { status: 'PUBLISHED' } : {}
+          const payload = await courseApi.listCourses(queries)
+          const list = Array.isArray(payload?.courses) ? payload.courses : []
+          const mapped = list.map(courseApi.mapCourseFromApi)
+
+          const owned =
+            currentUser.role === 'TRAINER' && (currentUser.status === 'approved' || currentUser.approvalStatus === 'APPROVED')
+              ? mapped.filter((c) => String(c.trainerId) === String(currentUser.id))
+              : []
+          for (const c of owned) {
+            try {
+              const [sections, questions] = await Promise.all([
+                courseApi.listSections(c.id).catch(() => []),
+                courseApi.listQuestions(c.id).catch(() => []),
+              ])
+              applySectionsToCourse(c, sections)
+              c.bank = (Array.isArray(questions) ? questions : []).map(courseApi.mapQuestionFromApi)
+            } catch {
+              /* keep course without hydrated content */
+            }
+          }
+
+          mapped.forEach((c) => {
+            if (String(c.trainerId) === String(currentUser.id)) c.trainer = currentUser.name || currentUser.fullName || ''
+          })
+          if (currentUser.status === 'approved' || currentUser.approvalStatus === 'APPROVED') {
+            const peerIds = [...new Set(mapped.filter((c) => !c.trainer && c.trainerId).map((c) => c.trainerId))]
+            const results = await Promise.allSettled(peerIds.map((id) => userApi.getUser(id)))
+            const names = new Map()
+            results.forEach((r, i) => {
+              if (r.status === 'fulfilled') {
+                const u = r.value?.user
+                names.set(peerIds[i], u?.name || u?.fullName || '')
+              }
+            })
+            mapped.forEach((c) => {
+              if (!c.trainer) c.trainer = names.get(c.trainerId) || ''
+            })
+          }
+
+          if (active) setCourses(mapped)
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[CourseContext] Failed to load courses from backend:', err.message)
+          if (active) setCourses([])
+        }
+      })()
+      return () => {
+        active = false
+      }
+    }
     if (!isFirebaseConfigured()) return
     let active = true
     courseService
@@ -33,18 +97,30 @@ export function CourseProvider({ children }) {
     return () => {
       active = false
     }
-  }, [currentUser])
+  }, [currentUser, backendActive])
 
   // User-scoped enrollments (traineeId + trainerId + courseId) which also carry
   // the course certificate once a course is completed. Seeded from the service's
   // (mock or Firestore-resolved) data source.
   const [enrollments, setEnrollments] = useState(() => courseService._enrollmentsSeed())
 
-  // When Firebase is configured, load the real enrollment documents the current
-  // user is allowed to read (trainee → own; trainer → own courses; admin → all).
-  // Like the course catalog, this keeps React state in sync with Firestore so a
-  // certificate earned on one device is visible on the trainer/admin dashboards.
+  // Load the caller's enrollments. Real (supabase) users read the authoritative
+  // backend enrollment rows; trainers additionally pull full rows (assessment +
+  // feedback) and issued certificates so the trainer course workspace stays
+  // complete. The Firestore/mock path is unchanged.
   useEffect(() => {
+    if (!currentUser) return
+    if (backendActive) {
+      let active = true
+      setEnrollments([])
+      syncEnrollments()
+        .catch(() => {
+          if (active) setEnrollments([])
+        })
+      return () => {
+        active = false
+      }
+    }
     if (!isFirebaseConfigured()) return
     let active = true
     courseService
@@ -59,12 +135,64 @@ export function CourseProvider({ children }) {
     return () => {
       active = false
     }
-  }, [currentUser])
+  }, [currentUser, backendActive, syncEnrollments])
+
+  // Backend trainer dashboards show live enrolled counts per course; reconcile
+  // them from the role-scoped backend enrollment rows when those rows change.
+  useEffect(() => {
+    if (!backendActive || currentUser?.role !== 'TRAINER') return
+    const owned = ownedTrainerIds(currentUser.id)
+    const counts = enrollments.reduce((acc, e) => {
+      if (owned.has(e.trainerId)) acc[e.courseId] = (acc[e.courseId] || 0) + 1
+      return acc
+    }, {})
+    setCourses((prev) =>
+      prev.length ? prev.map((c) => ({ ...c, enrolled: counts[c.id] || 0 })) : prev,
+    )
+  }, [enrollments, backendActive, currentUser])
 
   // Competency records aggregated from completed courses for admin/regional data.
   const [competencyRecords, setCompetencyRecords] = useState(() =>
     seedCompetencyRecords.map((c) => ({ ...c })),
   )
+
+  const syncEnrollments = useCallback(async () => {
+    const rows = await enrollmentApi.listEnrollments()
+    const list = Array.isArray(rows) ? rows : []
+    let enriched = list.map(courseApi.mapEnrollmentFromApi)
+    if (currentUser?.role === 'TRAINER') {
+      const [fullRows, certRows] = await Promise.all([
+        Promise.all(list.slice(0, 100).map((r) => enrollmentApi.getEnrollment(r.id).catch(() => null))),
+        certificateApi.listCertificates().catch(() => []),
+      ])
+      enriched = fullRows.filter(Boolean).map(courseApi.mapEnrollmentFromApi)
+      const certList = Array.isArray(certRows) ? certRows : []
+      const byEnrollment = new Map(certList.map((ct) => [String(ct.enrollmentId), ct]))
+      enriched.forEach((e) => {
+        const ct = byEnrollment.get(String(e.id))
+        if (ct) {
+          e.certificate = { id: ct.id, issuedOn: ct.issuedOn || null, certificateNumber: ct.certificateNumber || null }
+          if (ct.traineeName) e.traineeName = ct.traineeName
+        }
+      })
+    }
+    setEnrollments((prev) => (prev === enriched ? prev : enriched))
+  }, [currentUser])
+
+  function sectionBucket(sectionType) {
+    return courseApi.sectionKeyForType(sectionType) || 'notes'
+  }
+
+  function applySectionsToCourse(target, sections) {
+    const byType = { notes: [], slides: [], videos: [], practice: [] }
+    ;(Array.isArray(sections) ? sections : []).forEach((s) => {
+      byType[sectionBucket(s.sectionType)].push(courseApi.mapSectionFromApi(s))
+    })
+    target.notes = byType.notes
+    target.slides = byType.slides
+    target.videos = byType.videos
+    target.practice = byType.practice
+  }
 
   const isApprovedTrainer =
     currentUser?.role === 'TRAINER' &&
@@ -101,6 +229,17 @@ export function CourseProvider({ children }) {
     const course = courseById(courseId)
     if (!course || (course.status !== 'published' && course.status !== 'featured')) return false
     if (getEnrollment(courseId)) return false
+    if (backendActive) {
+      try {
+        await enrollmentApi.enroll(courseId)
+        await syncEnrollments()
+        return true
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] enroll failed:', err.message)
+        return false
+      }
+    }
     try {
       const created = await courseService.createEnrollment(currentUser, {
         courseId,
@@ -211,6 +350,19 @@ export function CourseProvider({ children }) {
 
   const createCourse = async (data) => {
     if (!currentUser) return null
+    if (backendActive) {
+      try {
+        const created = await courseApi.createCourse(data)
+        const mapped = courseApi.mapCourseFromApi(created)
+        mapped.trainer = currentUser.name || currentUser.fullName || ''
+        setCourses((prev) => [mapped, ...prev.filter((c) => c.id !== mapped.id)])
+        return mapped
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] createCourse failed:', err.message)
+        throw err
+      }
+    }
     try {
       const created = await courseService.createCourse(currentUser, data)
       if (created) setCourses((prev) => [created, ...prev])
@@ -222,15 +374,42 @@ export function CourseProvider({ children }) {
     }
   }
 
-  const updateCourse = (id, patch) =>
-    run(() => {
+  const updateCourse = async (id, patch) => {
+    if (!currentUser) return null
+    if (backendActive) {
+      try {
+        const updated = await courseApi.updateCourse(id, patch)
+        const mapped = courseApi.mapCourseFromApi(updated)
+        mapped.trainer = currentUser.name || currentUser.fullName || ''
+        setCourses((prev) => prev.map((c) => (c.id === id ? mapped : c)))
+        return mapped
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] updateCourse failed:', err.message)
+        return null
+      }
+    }
+    return run(() => {
       const updated = courseService.updateCourse(currentUser, id, patch)
       if (updated) setCourses((prev) => prev.map((c) => (c.id === id ? updated : c)))
       return updated
     })
+  }
 
-  const deleteCourse = (id) =>
-    run(() => {
+  const deleteCourse = async (id) => {
+    if (backendActive) {
+      try {
+        await courseApi.deleteCourse(id)
+        setCourses((prev) => prev.filter((c) => c.id !== id))
+        setEnrollments((prev) => prev.filter((e) => e.courseId !== id))
+        return true
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] deleteCourse failed:', err.message)
+        return false
+      }
+    }
+    return run(() => {
       const ok = courseService.deleteCourse(currentUser, id)
       if (ok) {
         setCourses((prev) => prev.filter((c) => c.id !== id))
@@ -239,14 +418,29 @@ export function CourseProvider({ children }) {
       }
       return ok
     })
+  }
 
   // Attempt to publish. Returns { ok, errors, warnings } based on readiness so
-  // the UI can render validation messages. Ownership/approved enforced upstream.
-  const publishCourse = (id) =>
-    run(() => {
-      const course = courseById(id)
-      if (!course) return { ok: false, errors: ['Course not found.'] }
-      const readiness = courseService.courseReadiness(course)
+  // the UI can render validation messages. For backend users the server re-validates
+  // the question-bank gate (>= MIN_VALID_QUESTIONS valid questions) and rejects
+  // with QUESTION_BANK_READY when the bank is short.
+  const publishCourse = async (id) => {
+    const course = courseById(id)
+    if (!course) return { ok: false, errors: ['Course not found.'] }
+    const readiness = courseService.courseReadiness(course)
+    if (backendActive) {
+      if (!readiness.ok) {
+        return { ok: false, errors: readiness.errors, warnings: readiness.warnings }
+      }
+      try {
+        const updated = await courseApi.updateCourse(id, { status: 'PUBLISHED' })
+        setCourses((prev) => prev.map((c) => (c.id === id ? { ...c, status: 'published', publishedAt: updated.publishedAt } : c)))
+        return { ok: true, errors: [], warnings: readiness.warnings }
+      } catch (err) {
+        return { ok: false, errors: [err?.message || 'The course could not be published.'], warnings: readiness.warnings }
+      }
+    }
+    return run(() => {
       if (!readiness.ok) {
         return { ok: false, errors: readiness.errors, warnings: readiness.warnings }
       }
@@ -254,68 +448,197 @@ export function CourseProvider({ children }) {
       if (published) setCourses((prev) => prev.map((c) => (c.id === id ? published : c)))
       return { ok: true, errors: [], warnings: readiness.warnings }
     })
+  }
 
   // Backward-compatible toggle (draft <-> published) routed through the service.
-  const togglePublish = (id) =>
-    run(() => {
-      const course = courseById(id)
-      if (!course) return
-      const next = course.status === 'published' || course.status === 'featured' ? 'draft' : 'published'
+  const togglePublish = async (id) => {
+    const course = courseById(id)
+    if (!course) return
+    const next = course.status === 'published' || course.status === 'featured' ? 'draft' : 'published'
+    if (backendActive) {
+      try {
+        const updated = await courseApi.updateCourse(id, { status: next === 'published' ? 'PUBLISHED' : 'DRAFT' })
+        setCourses((prev) => prev.map((c) => (c.id === id ? { ...c, status: next, publishedAt: updated.publishedAt } : c)))
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] togglePublish failed:', err.message)
+      }
+      return
+    }
+    return run(() => {
       const updated = courseService.setCourseStatus(currentUser, id, next)
       if (updated) setCourses((prev) => prev.map((c) => (c.id === id ? updated : c)))
     })
+  }
 
   // ---- Question Bank CRUD (owned by a single course) ----
 
-  const addQuestion = (courseId, q) =>
-    run(() => {
+  const refreshQuestionBank = async (courseId) => {
+    try {
+      const questions = await courseApi.listQuestions(courseId)
+      const bank = (Array.isArray(questions) ? questions : []).map(courseApi.mapQuestionFromApi)
+      setCourses((prev) => prev.map((c) => (c.id === courseId ? { ...c, bank } : c)))
+      return bank
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[CourseContext] refreshQuestionBank failed:', err.message)
+      return []
+    }
+  }
+
+  const addQuestion = async (courseId, q) => {
+    if (backendActive) {
+      try {
+        await courseApi.addQuestion(courseId, q)
+        await refreshQuestionBank(courseId)
+        return true
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] addQuestion failed:', err.message)
+        return false
+      }
+    }
+    return run(() => {
       const added = courseService.addQuestion(currentUser, courseId, q)
       const updated = courseService.getCourse(courseId)
       if (updated) setCourses((prev) => prev.map((c) => (c.id === courseId ? updated : c)))
       return added
     })
+  }
 
-  const updateQuestion = (courseId, qid, patch) =>
-    run(() => {
+  const updateQuestion = async (courseId, qid, patch) => {
+    if (backendActive) {
+      try {
+        await courseApi.updateQuestion(courseId, qid, patch)
+        await refreshQuestionBank(courseId)
+        return true
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] updateQuestion failed:', err.message)
+        return false
+      }
+    }
+    return run(() => {
       courseService.updateQuestion(currentUser, courseId, qid, patch)
       const updated = courseService.getCourse(courseId)
       if (updated) setCourses((prev) => prev.map((c) => (c.id === courseId ? updated : c)))
     })
+  }
 
-  const deleteQuestion = (courseId, qid) =>
-    run(() => {
+  const deleteQuestion = async (courseId, qid) => {
+    if (backendActive) {
+      try {
+        await courseApi.deleteQuestion(courseId, qid)
+        await refreshQuestionBank(courseId)
+        return true
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[CourseContext] deleteQuestion failed:', err.message)
+        return false
+      }
+    }
+    return run(() => {
       const updated = courseService.deleteQuestion(currentUser, courseId, qid)
       if (updated) setCourses((prev) => prev.map((c) => (c.id === courseId ? updated : c)))
     })
+  }
 
   // ---- Content-section management (notes / slides / videos / practice) ----
 
+  const SECTION_TYPE_BY_KEY = { notes: 'NOTES', slides: 'SLIDES', videos: 'VIDEOS', practice: 'PRACTICE' }
+
+  const sectionApiType = (sectionKey) => SECTION_TYPE_BY_KEY[sectionKey] || 'NOTES'
+
+  const refreshCourseSections = async (courseId) => {
+    const sections = await courseApi.listSections(courseId)
+    setCourses((prev) =>
+      prev.map((c) => {
+        if (c.id !== courseId) return c
+        const next = { ...c }
+        applySectionsToCourse(next, sections)
+        return next
+      }),
+    )
+    return sections
+  }
+
+  const escalateManuallyAddedContent = async (courseId, section, item) => {
+    const course = courseById(courseId)
+    const existing = course?.[section]?.find((s) => s.storagePath && s.storagePath === item.storagePath)
+    if (existing) return existing
+    await courseApi.addSection(courseId, {
+      sectionType: sectionApiType(section),
+      orderIndex: course?.[section]?.length ?? 0,
+      title: item.name || item.title || 'Material',
+    })
+    await refreshCourseSections(courseId)
+    return null
+  }
+
   const syncCourse = (courseId) => {
+    if (backendActive) {
+      refreshCourseSections(courseId).catch(() => {})
+      return undefined
+    }
     const updated = courseService.getCourse(courseId)
     if (updated) setCourses((prev) => prev.map((c) => (c.id === courseId ? updated : c)))
     return updated
   }
 
   const addContent = async (courseId, section, item) => {
+    if (backendActive) {
+      const entry = await escalateManuallyAddedContent(courseId, section, item)
+      return entry || item
+    }
     const entry = await courseService.addContentItem(currentUser, courseId, section, item)
     syncCourse(courseId)
     return entry
   }
 
   const updateContent = async (courseId, section, itemId, patch) => {
+    if (backendActive) {
+      await refreshCourseSections(courseId)
+      return undefined
+    }
     const updated = await courseService.updateContentItem(currentUser, courseId, section, itemId, patch)
     if (updated) setCourses((prev) => prev.map((c) => (c.id === courseId ? updated : c)))
     return updated
   }
 
   const removeContent = async (courseId, section, itemId) => {
+    if (backendActive) {
+      const course = courseById(courseId)
+      const item = course?.[section]?.find((s) => s.id === itemId)
+      if (!item && itemId) {
+        await refreshCourseSections(courseId)
+        return undefined
+      }
+      await courseApi.removeSection(courseId, itemId)
+      await refreshCourseSections(courseId)
+      return undefined
+    }
     const updated = await courseService.removeContentItem(currentUser, courseId, section, itemId)
     if (updated) setCourses((prev) => prev.map((c) => (c.id === courseId ? updated : c)))
     return updated
   }
 
-  const uploadCourseFile = (courseId, folder, file) =>
-    courseService.uploadCourseFile(currentUser, courseId, folder, file)
+  const uploadCourseFile = async (courseId, folder, file) => {
+    if (backendActive) {
+      const course = courseById(courseId)
+      await courseApi.uploadSection(
+        courseId,
+        {
+          sectionType: sectionApiType(folder),
+          orderIndex: course?.[folder]?.length ?? 0,
+          title: file.name,
+        },
+        file,
+      )
+      await refreshCourseSections(courseId)
+      return true
+    }
+    return courseService.uploadCourseFile(currentUser, courseId, folder, file)
+  }
 
   // ---- Legacy helpers mapped onto the content model ----
   // (kept so existing trainer UI continues to work; new UI uses addContent.)

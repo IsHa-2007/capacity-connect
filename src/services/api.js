@@ -13,7 +13,7 @@
 // in API_PREFIX below; a configured base that already ends in '/api' is
 // normalised down to the origin so a double '/api/api' can never be produced.
 
-const API_PREFIX = '/api'
+export const API_PREFIX = '/api'
 
 // Normalises VITE_API_BASE_URL to a bare origin: strips trailing slashes and a
 // trailing '/api' if someone configured it that way. Defaults to the origin of
@@ -23,7 +23,7 @@ function apiBaseUrl() {
   return raw.replace(/\/api$/i, '')
 }
 
-const API_BASE_URL = apiBaseUrl()
+export const API_BASE_URL = apiBaseUrl()
 
 const TOKEN_KEY = 'capacity_connect_access_token'
 
@@ -108,4 +108,5 @@ export const api = {
   get: (path, options) => request(path, { method: 'GET', ...options }),
   post: (path, body, options) => request(path, { method: 'POST', body, ...options }),
   patch: (path, body, options) => request(path, { method: 'PATCH', body, ...options }),
+  del: (path, options) => request(path, { method: 'DELETE', ...options }),
 }
