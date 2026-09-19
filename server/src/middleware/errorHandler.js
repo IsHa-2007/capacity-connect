@@ -1,12 +1,30 @@
 import { ApiError, sendError } from '../utils/apiResponse.js'
 
+// Client-facing `details` must never contain raw database / Supabase error text.
+// Repositories legitimately attach { dbCode, dbMessage } for server-side
+// triage, but `dbCode` is an opaque constraint code while `dbMessage` can
+// include table/column names or Postgres wording — so it is stripped here, at
+// the single serialisation boundary, before anything reaches the client.
+function sanitizeDetails(details) {
+  if (Array.isArray(details)) return details.map((d) => sanitizeDetails(d))
+  if (details && typeof details === 'object') {
+    const out = {}
+    for (const [key, value] of Object.entries(details)) {
+      if (key === 'dbMessage') continue
+      out[key] = sanitizeDetails(value)
+    }
+    return out
+  }
+  return details
+}
+
 export function errorHandler(err, req, res, _next) {
   if (err instanceof ApiError) {
     return sendError(res, {
       status: err.status,
       code: err.code,
       message: err.message,
-      details: err.details,
+      details: sanitizeDetails(err.details),
     })
   }
 
@@ -20,11 +38,12 @@ export function errorHandler(err, req, res, _next) {
     })
   }
 
-  if (err && err.expose === true && typeof err.statusCode === 'number') {
+  const bodyParserStatus = err?.expose === true ? Number(err?.statusCode ?? err?.status) : NaN
+  if (Number.isInteger(bodyParserStatus) && [400, 413].includes(bodyParserStatus)) {
     return sendError(res, {
-      status: err.statusCode,
-      code: err.statusCode === 413 ? 'PAYLOAD_TOO_LARGE' : 'INVALID_REQUEST_BODY',
-      message: err.statusCode === 413 ? 'Request body too large.' : 'Malformed request body.',
+      status: bodyParserStatus,
+      code: bodyParserStatus === 413 ? 'PAYLOAD_TOO_LARGE' : 'INVALID_REQUEST_BODY',
+      message: bodyParserStatus === 413 ? 'Request body too large.' : 'Malformed request body.',
     })
   }
 

@@ -6,13 +6,13 @@ import * as controller from '../controllers/course.controller.js'
 import {
   createCourseSchema, updateCourseSchema,
   courseIdParamSchema, createSectionSchema, updateSectionSchema,
-  sectionIdParamSchema, uploadSectionFieldsSchema,
+  sectionIdParamSchema, uploadSectionFieldsSchema, listCoursesQuerySchema,
   createQuestionSchema, updateQuestionSchema, questionIdParamSchema,
 } from '../validators/course.validator.js'
 
 const router = Router()
 
-router.get('/', authenticate, controller.listCourses)
+router.get('/', authenticate, validate(listCoursesQuerySchema, 'query'), controller.listCourses)
 router.get('/:id', authenticate, validate(courseIdParamSchema, 'params'), controller.getCourse)
 router.post('/', authenticate, validate(createCourseSchema), controller.createCourse)
 router.patch('/:id', authenticate, validate(courseIdParamSchema, 'params'), validate(updateCourseSchema), controller.updateCourse)

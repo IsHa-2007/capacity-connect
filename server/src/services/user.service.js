@@ -135,9 +135,11 @@ export async function listUsers({ limit = 200 } = {}) {
 }
 
 // ADMIN: capability search across ALL users via users.search_vector. Role-
-// independent by design (the RBAC guard lives at the route layer).
+// independent by design (the RBAC guard lives at the route layer). The search
+// text is capped to keep pathological queries out of plainto_tsquery.
 export async function searchUsers(query, { limit = 50 } = {}) {
-  const rows = await searchProfiles(query, { limit })
+  const q = String(query || '').trim().slice(0, 200)
+  const rows = await searchProfiles(q, { limit })
   return { results: rows.map(toProfile) }
 }
 

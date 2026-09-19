@@ -90,6 +90,9 @@ function friendlyAuthError(err) {
   if (code === 'UNAUTHENTICATED') return 'Your session has expired. Please sign in again.'
   if (code === 'APPROVAL_REQUIRED') return 'Your account has not been approved yet.'
   if (code === 'ROLE_LOCKED') return err.message || 'This operation is not allowed.'
+  if (code === 'RATE_LIMITED' || err?.status === 429) {
+    return 'Too many attempts. Please wait a few minutes and try again.'
+  }
   if (code.startsWith('PROFILE_') || code === 'USER_NOT_FOUND') return err.message || 'Your profile could not be loaded.'
   if (code === 'VALIDATION_ERROR') {
     // Surface the exact offending field(s) the backend rejected. `details` only
