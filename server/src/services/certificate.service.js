@@ -33,6 +33,7 @@ import { ApiError } from '../utils/apiResponse.js'
 import * as repo from '../repositories/certificate.repository.js'
 import { findEnrollmentById, findCourseById } from '../repositories/enrollment.repository.js'
 import { findProfileById } from '../repositories/user.repository.js'
+import { insertNotifications } from '../repositories/notification.repository.js'
 import { ROLE_TRAINEE, ROLE_TRAINER, ROLE_ADMIN, isApproved } from '../lib/roles.js'
 
 export const CERTIFICATE_PREFIX = 'CC'
@@ -176,6 +177,13 @@ export async function getOrIssueCertificate(actor, enrollmentId) {
         issuedOn: new Date().toISOString(),
         issuedBy: null, // platform-issued: the identity in the view is the issuer label
       })
+      // Module 17 — backend-generated "certificate issued" notification for the
+      // recipient. Purely additive and deliberately non-fatal: a notification
+      // failure must NEVER hold up certificate issuance (the M12 contract is
+      // unchanged), so any error is logged and the flow continues.
+      notifyCertificateIssued({ userId: enrollment.userId, certificateNumber, course }).catch((err) => {
+        console.warn('[certificate] notification dispatch skipped:', err?.message || err)
+      })
       return certificateView(certificate, { enrollment, course, trainee })
     } catch (err) {
       // Not a unique-violation conflict → surface the underlying error.
@@ -289,4 +297,24 @@ export function verificationView(certificate, { traineeName, courseTitle, course
     completionStatus,
     issuer: CERTIFICATE_ISSUER_LABEL,
   }
+}
+
+// ---------------------------------------------------------------------------
+// MODULE 17 — CERTIFICATE-ISSUED NOTIFICATION (additive, non-fatal)
+// ---------------------------------------------------------------------------
+// Backend-generated notification for the certificate recipient. This is a
+// best-effort side effect only: the M12 issuance contract (numbering, gates,
+// idempotency, RBAC) is untouched and a notification failure is never allowed
+// to fail or block certificate issuance.
+export async function notifyCertificateIssued({ userId, certificateNumber, course }) {
+  await insertNotifications([
+    {
+      user_id: userId,
+      broadcast_id: null,
+      title: 'Certificate issued',
+      body: course?.title
+        ? `Your certificate for "${course.title}" has been issued (${certificateNumber}).`
+        : `Your certificate (${certificateNumber}) has been issued.`,
+    },
+  ])
 }

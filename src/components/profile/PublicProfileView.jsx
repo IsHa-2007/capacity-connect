@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { Avatar, Badge, Card } from '../common/ui'
+import * as userApi from '../../services/userApi'
 
 // Public profile view. Shows only professional/public details gathered from the
 // user's directory entry and full profile — never sensitive account data such as
@@ -23,6 +24,9 @@ export default function PublicProfileView({ backTo }) {
   const { getProfileByUid, currentUser } = useAuth()
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [apiCerts, setApiCerts] = useState([])
+
+  const backendActive = currentUser?.authSource === 'supabase'
 
   useEffect(() => {
     let mounted = true
@@ -34,6 +38,30 @@ export default function PublicProfileView({ backTo }) {
       mounted = false
     }
   }, [uid, getProfileByUid])
+
+  // Approved viewers read another user's certifications from the backend RBAC
+  // projection; mock sessions fall back to the profile's own list.
+  useEffect(() => {
+    if (!backendActive || !profile?.uid) return
+    let active = true
+    userApi
+      .getUserCertifications(profile.uid)
+      .then((list) => {
+        if (active) setApiCerts(list)
+      })
+      .catch(() => {
+        if (active) setApiCerts([])
+      })
+    return () => {
+      active = false
+    }
+  }, [backendActive, profile?.uid])
+
+  const certifications = backendActive
+    ? apiCerts
+    : Array.isArray(profile?.certifications)
+      ? profile.certifications
+      : []
 
   const roleLabel = { TRAINEE: 'Trainee', TRAINER: 'Trainer', ADMIN: 'Admin' }
   const isSelf = currentUser && (currentUser.uid === profile?.uid)
@@ -103,6 +131,25 @@ export default function PublicProfileView({ backTo }) {
               <Chips values={profile.skills} empty="No skills listed" />
             </Section>
           )}
+
+          {certifications.length > 0 && (
+            <Section icon={Award} title="Professional Certifications">
+              <div className="space-y-2">
+                {certifications.map((cert) => (
+                  <div key={cert.id} className="rounded-lg border border-border-subtle bg-sky-soft px-3 py-2">
+                    <p className="text-sm font-medium text-primary-deep">
+                      {cert.title || cert.certificationName}
+                    </p>
+                    <p className="text-xs text-slate-muted">
+                      {[cert.issuingOrganization || cert.issuer, formatCertDate(cert.issueDate || cert.obtainedDate)]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
         </>
       )}
     </div>
@@ -132,4 +179,11 @@ function Chips({ values, empty }) {
       ))}
     </div>
   )
+}
+
+function formatCertDate(d) {
+  if (!d) return ''
+  const date = new Date(d)
+  if (Number.isNaN(date.getTime())) return String(d)
+  return date.toLocaleDateString('en-IN', { year: 'numeric', month: 'short' })
 }

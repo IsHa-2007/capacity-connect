@@ -1,14 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Award, Calendar, Eye, Link2, Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { Button, Card, Modal } from '../common/ui'
 import InAppFileViewer from './InAppFileViewer'
 import {
-  addCertification,
-  updateCertification,
-  removeCertification,
-  uploadCertificationFile,
+  addCertification as addMockCertification,
+  updateCertification as updateMockCertification,
+  removeCertification as removeMockCertification,
+  uploadCertificationFile as uploadMockCertificationFile,
 } from '../../services/userService'
+import * as userApi from '../../services/userApi'
 
 const EMPTY = {
   title: '',
@@ -21,29 +22,68 @@ const EMPTY = {
 }
 
 export default function CertificationManager({ uid, certifications = [] }) {
-  const { refreshUserProfile } = useAuth()
+  const { currentUser, refreshUserProfile } = useAuth()
+  const backendActive = currentUser?.authSource === 'supabase'
+
+  // Owned certifications. Mock sessions derive from the profile prop (and
+  // refresh the auth profile on write); real (supabase) sessions read + write
+  // the authoritative backend and keep a local mirror for instant UI updates.
+  const [items, setItems] = useState(certifications)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
   const [viewing, setViewing] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!backendActive) return
+    let active = true
+    userApi
+      .listMyCertifications()
+      .then((list) => {
+        if (active) setItems(list)
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[CertificationManager] Failed to load certifications:', err.message)
+        if (active) setItems([])
+      })
+    return () => {
+      active = false
+    }
+  }, [backendActive])
+
+  // Mock sessions render straight from the profile prop (writes refresh it via
+  // the auth context); real sessions render the backend mirror.
+  const displayItems = backendActive ? items : certifications
 
   const createId = () => `cert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   const refresh = async () => {
-    await refreshUserProfile()
+    if (backendActive) {
+      setItems(await userApi.listMyCertifications())
+    } else {
+      await refreshUserProfile()
+    }
   }
 
   const handleSave = async (data) => {
     setBusy(true)
+    setError('')
     try {
-      if (editing && editing.id) {
-        await updateCertification(uid, editing.id, data)
+      if (backendActive) {
+        if (editing?.id) await userApi.updateMyCertification(editing.id, data)
+        else await userApi.addMyCertification(data)
+      } else if (editing && editing.id) {
+        await updateMockCertification(uid, editing.id, data)
       } else {
-        await addCertification(uid, { ...data, id: createId() })
+        await addMockCertification(uid, { ...data, id: createId() })
       }
       await refresh()
       setShowForm(false)
       setEditing(null)
+    } catch (err) {
+      setError(err?.message || 'The certification could not be saved.')
     } finally {
       setBusy(false)
     }
@@ -51,9 +91,13 @@ export default function CertificationManager({ uid, certifications = [] }) {
 
   const handleRemove = async (cert) => {
     setBusy(true)
+    setError('')
     try {
-      await removeCertification(uid, cert.id)
+      if (backendActive) await userApi.removeMyCertification(cert.id)
+      else await removeMockCertification(uid, cert.id)
       await refresh()
+    } catch (err) {
+      setError(err?.message || 'The certification could not be removed.')
     } finally {
       setBusy(false)
     }
@@ -62,9 +106,27 @@ export default function CertificationManager({ uid, certifications = [] }) {
   const handleFile = async (cert, file) => {
     if (!file || !cert) return
     setBusy(true)
+    setError('')
     try {
-      await uploadCertificationFile(uid, cert.id, file)
+      if (backendActive) {
+        const uploaded = await userApi.uploadCertificationFile(file)
+        // The upload carries the metadata the backend stores alongside the file
+        // reference, so the row keeps its title/issuer/dates.
+        await userApi.updateMyCertification(cert.id, {
+          title: cert.title,
+          issuingOrganization: cert.issuingOrganization,
+          issueDate: cert.issueDate,
+          expiryDate: cert.expiryDate,
+          credentialId: cert.credentialId,
+          credentialUrl: cert.credentialUrl,
+          ...uploaded,
+        })
+      } else {
+        await uploadMockCertificationFile(uid, cert.id, file)
+      }
       await refresh()
+    } catch (err) {
+      setError(err?.message || 'The file could not be uploaded.')
     } finally {
       setBusy(false)
     }
@@ -81,9 +143,13 @@ export default function CertificationManager({ uid, certifications = [] }) {
         </Button>
       </div>
 
-      {certifications.length ? (
+      {error && (
+        <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
+      )}
+
+      {displayItems.length ? (
         <div className="mt-4 space-y-3">
-          {certifications.map((cert) => (
+          {displayItems.map((cert) => (
             <div key={cert.id} className="rounded-xl border border-border-soft bg-sky-soft p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex items-start gap-3">
@@ -141,20 +207,27 @@ export default function CertificationManager({ uid, certifications = [] }) {
         </p>
       )}
 
-      <CertForm open={showForm} editing={editing} onClose={() => { setShowForm(false); setEditing(null); }} onSave={handleSave} busy={busy} />
+      <CertForm
+        open={showForm}
+        editing={editing}
+        showDescription={!backendActive}
+        onClose={() => { setShowForm(false); setEditing(null); setError('') }}
+        onSave={handleSave}
+        busy={busy}
+      />
 
       <InAppFileViewer
         open={!!viewing}
         onClose={() => setViewing(null)}
         fileURL={viewing?.fileURL}
-        fileType={viewing?.fileType}
+        fileType={viewing?.fileType || viewing?.mimeType}
         title={viewing?.title}
       />
     </Card>
   )
 }
 
-function CertForm({ open, editing, onClose, onSave, busy }) {
+function CertForm({ open, editing, onSave, busy, onClose, showDescription = true }) {
   const [form, setForm] = useState(EMPTY)
   const [error, setError] = useState('')
 
@@ -211,9 +284,11 @@ function CertForm({ open, editing, onClose, onSave, busy }) {
             <input value={form.credentialUrl} onChange={set('credentialUrl')} placeholder="https://..." className="pf-inp" />
           </Field>
         </div>
-        <Field label="Description (optional)">
-          <textarea value={form.description} onChange={set('description')} rows={2} placeholder="Briefly describe the certification" className="pf-inp resize-none" />
-        </Field>
+        {showDescription && (
+          <Field label="Description (optional)">
+            <textarea value={form.description} onChange={set('description')} rows={2} placeholder="Briefly describe the certification" className="pf-inp resize-none" />
+          </Field>
+        )}
         {error && <p className="text-sm text-rose-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="subtle" onClick={onClose}>Cancel</Button>

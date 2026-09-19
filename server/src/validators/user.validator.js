@@ -55,3 +55,45 @@ export const roleChangeSchema = z.object({
 export const approvalChangeSchema = z.object({
   approvalStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED']),
 })
+
+// MODULE 17 — self-added professional certifications (public.user_certifications).
+// Strict: only whitelisted fields may arrive; identity/ownership (userId, id,
+// createdAt) are stripped before the service sees the request. Dates are the
+// DATE-typed YYYY-MM-DD values the certification manager sends. The optional
+// file reference mirrors the profile-photo pattern (browser uploads to
+// Cloudinary, backend records only the public_id + metadata).
+export const certificationSchema = z
+  .object({
+    certificationName: z
+      .string()
+      .trim()
+      .min(1, 'Certification title is required.')
+      .max(200, 'Certification title must be at most 200 characters.'),
+    issuer: z
+      .string()
+      .trim()
+      .min(1, 'Issuing organization is required.')
+      .max(200, 'Issuing organization must be at most 200 characters.'),
+    obtainedDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Issue date must be in YYYY-MM-DD format.'),
+    expiryDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiry date must be in YYYY-MM-DD format.')
+      .nullable()
+      .optional(),
+    credentialId: z.string().trim().max(200, 'Credential ID is too long.').nullish(),
+    credentialUrl: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+      z.string().trim().url('Credential URL must be a valid URL.').max(500, 'Credential URL is too long.').nullish(),
+    ),
+    storagePath: z.string().trim().max(255, 'File reference is invalid.').nullish(),
+    mimeType: z.string().trim().max(100, 'File MIME type is invalid.').nullish(),
+    fileSize: z.coerce.number().int().min(0).max(20 * 1024 * 1024, 'File is too large.').nullish(),
+    originalFilename: z.string().trim().max(255, 'File name is invalid.').nullish(),
+  })
+  .strict()
+
+export const certificationIdParamSchema = z.object({ id: z.string().uuid('Invalid identifier.') })
+
+export const userIdParamSchema = z.object({ id: z.string().uuid('Invalid identifier.') })

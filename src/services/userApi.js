@@ -92,3 +92,107 @@ export async function uploadProfilePhoto(file) {
   })
   return data?.profile || null
 }
+
+// ---------------------------------------------------------------------------
+// MODULE 17 — PROFESSIONAL CERTIFICATIONS (self-service, backend-persisted)
+// ---------------------------------------------------------------------------
+// These mirror the backend /users/me/certifications CRUD. The backend owns
+// ownership (derived from the access token) and the RBAC projection, so this
+// client never sends a user id. Field names differ from the UI's historic
+// mock shape (title/issuingOrganization/issueDate <-> certificationName/issuer/
+// obtainedDate); the component adapts via the mappers below.
+
+export function mapCertificationFromApi(c = {}) {
+  return {
+    id: c.id,
+    title: c.certificationName || '',
+    issuingOrganization: c.issuer || '',
+    issueDate: c.obtainedDate || '',
+    expiryDate: c.expiryDate || '',
+    credentialId: c.credentialId || '',
+    credentialUrl: c.credentialUrl || '',
+    storagePath: c.storagePath || '',
+    mimeType: c.mimeType || '',
+    fileSize: c.fileSize ?? null,
+    originalFilename: c.originalFilename || '',
+    fileURL: certFileUrl(c),
+  }
+}
+
+// Converts the UI form into the backend certification payload. Storage fields
+// are only included when the form carries them (i.e. a file was uploaded or the
+// edit started from a row that already has one), so a metadata-only edit never
+// accidentally clears an existing file.
+export function toCertificationPayload(form) {
+  const payload = {
+    certificationName: String(form.title || '').trim(),
+    issuer: String(form.issuingOrganization || '').trim(),
+    obtainedDate: form.issueDate || null,
+    expiryDate: form.expiryDate || null,
+    credentialId: String(form.credentialId || '').trim(),
+    credentialUrl: String(form.credentialUrl || '').trim(),
+  }
+  if (form.storagePath !== undefined) {
+    payload.storagePath = form.storagePath || null
+    payload.mimeType = form.mimeType || ''
+    payload.fileSize = form.fileSize ?? null
+    payload.originalFilename = form.originalFilename || ''
+  }
+  return payload
+}
+
+// Rebuilds a Cloudinary delivery URL from a stored public_id. Images use the
+// image endpoint; documents (pdf/docx/…) use the raw endpoint.
+export function certFileUrl(cert) {
+  const publicId = cert?.storagePath || cert?.public_id
+  if (!publicId || String(publicId).startsWith('mock:') || !CLOUD_NAME) return ''
+  const type = String(cert?.mimeType || '').startsWith('image/') ? 'image' : 'raw'
+  return `https://res.cloudinary.com/${CLOUD_NAME}/${type}/upload/${publicId}`
+}
+
+export async function listMyCertifications() {
+  const data = await api.get('/users/me/certifications', withToken())
+  return Array.isArray(data?.certifications) ? data.certifications.map(mapCertificationFromApi) : []
+}
+
+export async function addMyCertification(form) {
+  const data = await api.post('/users/me/certifications', toCertificationPayload(form), withToken())
+  return data?.certification ? mapCertificationFromApi(data.certification) : null
+}
+
+export async function updateMyCertification(id, form) {
+  const data = await api.patch(
+    `/users/me/certifications/${encodeURIComponent(id)}`,
+    toCertificationPayload(form),
+    withToken(),
+  )
+  return data?.certification ? mapCertificationFromApi(data.certification) : null
+}
+
+export async function removeMyCertification(id) {
+  return api.del(`/users/me/certifications/${encodeURIComponent(id)}`, withToken())
+}
+
+// Approved viewers/ADMIN can read another user's public certifications.
+export async function getUserCertifications(id) {
+  const data = await api.get(`/users/${encodeURIComponent(id)}/certifications`, withToken())
+  return Array.isArray(data?.certifications) ? data.certifications.map(mapCertificationFromApi) : []
+}
+
+// Uploads a certification document to Cloudinary and returns the file reference
+// the backend stores on the certification row (storage_path etc.).
+export async function uploadCertificationFile(file) {
+  if (!file) return null
+  const result = await uploadToCloudinary(file, {
+    folder: 'profiles/certifications',
+    publicId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extOf(file.name)}`,
+    metadata: { purpose: 'certification' },
+  })
+  return {
+    storagePath: result.public_id,
+    mimeType: file.type || '',
+    fileSize: file.size,
+    originalFilename: file.name,
+    fileURL: result.fileURL,
+  }
+}

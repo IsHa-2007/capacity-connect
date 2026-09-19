@@ -102,6 +102,31 @@ export function CourseProvider({ children }) {
   // (mock) data source.
   const [enrollments, setEnrollments] = useState(() => courseService._enrollmentsSeed())
 
+  // Declared before the effect that depends on it: the effect's dependency array
+  // is evaluated during render, so syncEnrollments must be initialized first.
+  const syncEnrollments = useCallback(async () => {
+    const rows = await enrollmentApi.listEnrollments()
+    const list = Array.isArray(rows) ? rows : []
+    let enriched = list.map(courseApi.mapEnrollmentFromApi)
+    if (currentUser?.role === 'TRAINER') {
+      const [fullRows, certRows] = await Promise.all([
+        Promise.all(list.slice(0, 100).map((r) => enrollmentApi.getEnrollment(r.id).catch(() => null))),
+        certificateApi.listCertificates().catch(() => []),
+      ])
+      enriched = fullRows.filter(Boolean).map(courseApi.mapEnrollmentFromApi)
+      const certList = Array.isArray(certRows) ? certRows : []
+      const byEnrollment = new Map(certList.map((ct) => [String(ct.enrollmentId), ct]))
+      enriched.forEach((e) => {
+        const ct = byEnrollment.get(String(e.id))
+        if (ct) {
+          e.certificate = { id: ct.id, issuedOn: ct.issuedOn || null, certificateNumber: ct.certificateNumber || null }
+          if (ct.traineeName) e.traineeName = ct.traineeName
+        }
+      })
+    }
+    setEnrollments((prev) => (prev === enriched ? prev : enriched))
+  }, [currentUser])
+
   // Load the caller's enrollments. Real (supabase) users read the authoritative
   // backend enrollment rows; trainers additionally pull full rows (assessment +
   // feedback) and issued certificates so the trainer course workspace stays
@@ -152,29 +177,6 @@ export function CourseProvider({ children }) {
   const [competencyRecords, setCompetencyRecords] = useState(() =>
     seedCompetencyRecords.map((c) => ({ ...c })),
   )
-
-  const syncEnrollments = useCallback(async () => {
-    const rows = await enrollmentApi.listEnrollments()
-    const list = Array.isArray(rows) ? rows : []
-    let enriched = list.map(courseApi.mapEnrollmentFromApi)
-    if (currentUser?.role === 'TRAINER') {
-      const [fullRows, certRows] = await Promise.all([
-        Promise.all(list.slice(0, 100).map((r) => enrollmentApi.getEnrollment(r.id).catch(() => null))),
-        certificateApi.listCertificates().catch(() => []),
-      ])
-      enriched = fullRows.filter(Boolean).map(courseApi.mapEnrollmentFromApi)
-      const certList = Array.isArray(certRows) ? certRows : []
-      const byEnrollment = new Map(certList.map((ct) => [String(ct.enrollmentId), ct]))
-      enriched.forEach((e) => {
-        const ct = byEnrollment.get(String(e.id))
-        if (ct) {
-          e.certificate = { id: ct.id, issuedOn: ct.issuedOn || null, certificateNumber: ct.certificateNumber || null }
-          if (ct.traineeName) e.traineeName = ct.traineeName
-        }
-      })
-    }
-    setEnrollments((prev) => (prev === enriched ? prev : enriched))
-  }, [currentUser])
 
   function sectionBucket(sectionType) {
     return courseApi.sectionKeyForType(sectionType) || 'notes'

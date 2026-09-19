@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
@@ -13,15 +14,49 @@ import {
 import { Card, StatCard, Badge } from '../common/ui'
 import { useAuth } from '../../context/AuthContext'
 import { useCourses } from '../../context/CourseContext'
+import * as analyticsApi from '../../services/analyticsApi'
 
 export default function AdminDashboardView() {
-  const { pendingUsers } = useAuth()
+  const { pendingUsers, currentUser } = useAuth()
   const { courses, competencyRecords } = useCourses()
+  const backendActive = currentUser?.authSource === 'supabase'
+  const [summary, setSummary] = useState(null)
+
+  // Real (supabase) admins read the authoritative platform summary; the mock
+  // path keeps deriving figures from the seeded stores used for demos.
+  useEffect(() => {
+    if (!backendActive) return
+    let active = true
+    analyticsApi
+      .getInsights()
+      .then((data) => {
+        if (active) setSummary(data?.summary || {})
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[AdminHomeView] Failed to load platform insights:', err.message)
+        if (active) setSummary({})
+      })
+    return () => {
+      active = false
+    }
+  }, [backendActive])
+
   const pending = pendingUsers.length
   const activeCourses = courses.filter((c) => c.status === 'published').length
   const avgCompetency = competencyRecords.length
     ? Math.round(competencyRecords.reduce((s, r) => s + r.competency, 0) / competencyRecords.length)
-    : 0
+    : null
+
+  const stat = (key, fallback) =>
+    backendActive ? (summary && summary[key] != null ? summary[key] : null) : fallback
+
+  const trainees = stat('approvedTrainees', null)
+  const trainers = stat('approvedTrainers', null)
+  const stationCount = stat('stationCount', null)
+  const regionCount = stat('regionCount', null)
+  const runningCourses = stat('publishedCourses', activeCourses)
+  const competency = backendActive ? summary?.avgAssessmentPercentage ?? null : avgCompetency
 
   return (
     <div className="space-y-8">
@@ -41,14 +76,15 @@ export default function AdminDashboardView() {
         </div>
       </div>
 
-      {/* Summary metrics */}
+      {/* Summary metrics — every figure comes from the authoritative backend
+          (or is left blank) instead of a hardcoded placeholder. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <StatCard icon={ShieldCheck} label="Pending Approvals" value={pending} tone="amber" />
-        <StatCard icon={Users} label="Active Trainees" value="2,400" sub="86% verified" />
-        <StatCard icon={UserCheck} label="Verified Trainers" value="78" tone="green" />
-        <StatCard icon={Map} label="Regional Coverage" value="36" sub="stations" tone="navy" />
-        <StatCard icon={GraduationCap} label="Courses Running" value={activeCourses} />
-        <StatCard icon={BarChart3} label="Avg Competency" value={`${avgCompetency}%`} tone="green" />
+        <StatCard icon={ShieldCheck} label="Pending Approvals" value={backendActive ? (summary?.pendingApprovals ?? '—') : pending} tone="amber" />
+        <StatCard icon={Users} label="Active Trainees" value={trainees ?? '—'} />
+        <StatCard icon={UserCheck} label="Verified Trainers" value={trainers ?? '—'} tone="green" />
+        <StatCard icon={Map} label="Regional Coverage" value={stationCount ?? '—'} sub={regionCount ? `${regionCount} regions` : 'stations'} tone="navy" />
+        <StatCard icon={GraduationCap} label="Courses Running" value={runningCourses ?? 0} />
+        <StatCard icon={BarChart3} label="Avg Competency" value={competency == null ? '—' : `${competency}%`} tone="green" />
       </div>
 
       {/* Quick actions + verification */}

@@ -1,51 +1,92 @@
-import { createContext, useContext, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { broadcasts as seedBroadcasts } from '../data/mockData'
+import { useAuth } from './AuthContext'
+import * as broadcastApi from '../services/broadcastApi'
 
 const BroadcastContext = createContext(null)
 
-const AUDIENCE_ROLES = {
-  'all-trainees': ['trainee'],
-  'all-trainers': ['trainer'],
-  'all': ['trainee', 'trainer'],
+// Normalises the seeded demo broadcasts (mock path) into the same render shape
+// the backend API mapper produces, so components read one shape either way.
+function normalizeSeed(b) {
+  const audienceArr = Array.isArray(b.audience) ? b.audience : []
+  let audienceKey = 'all-trainees'
+  const hasTrainee = audienceArr.includes('trainee')
+  const hasTrainer = audienceArr.includes('trainer')
+  if (hasTrainee && hasTrainer) audienceKey = 'all'
+  else if (hasTrainer) audienceKey = 'all-trainers'
+  else if (hasTrainee) audienceKey = 'all-trainees'
+  return {
+    ...b,
+    published: true,
+    audienceKey,
+    audienceLabel: audienceArr.join(' · '),
+  }
 }
 
 export function BroadcastProvider({ children }) {
-  const [broadcasts, setBroadcasts] = useState(() =>
-    seedBroadcasts.map((b) => {
-      const audienceArr = Array.isArray(b.audience) ? b.audience : []
-      let audienceKey = 'all-trainees'
-      const hasTrainee = audienceArr.includes('trainee')
-      const hasTrainer = audienceArr.includes('trainer')
-      if (hasTrainee && hasTrainer) audienceKey = 'all'
-      else if (hasTrainer) audienceKey = 'all-trainers'
-      else if (hasTrainee) audienceKey = 'all-trainees'
-      return {
-        ...b,
-        published: true,
-        audienceKey,
-        audienceLabel: audienceArr.join(' · '),
+  const { currentUser } = useAuth()
+  const backendActive = Boolean(currentUser && currentUser.authSource === 'supabase')
+
+  const [broadcasts, setBroadcasts] = useState(() => seedBroadcasts.map(normalizeSeed))
+
+  // Real (supabase) sessions read the authoritative, audience-filtered list the
+  // backend returns for this caller; the in-memory mock path stays unchanged.
+  useEffect(() => {
+    if (!currentUser || !backendActive) return
+    let active = true
+    broadcastApi
+      .listBroadcasts()
+      .then((list) => {
+        if (active) setBroadcasts(list)
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[BroadcastContext] Failed to load broadcasts from backend:', err.message)
+        if (active) setBroadcasts([])
+      })
+    return () => {
+      active = false
+    }
+  }, [currentUser, backendActive])
+
+  const publishBroadcast = useCallback(
+    async (data) => {
+      if (backendActive) {
+        // Backend resolves the audience, persists the row and fans out the
+        // notifications; the returned broadcast is already in render shape.
+        const result = await broadcastApi.createBroadcast(data)
+        if (result.broadcast) setBroadcasts((prev) => [result.broadcast, ...prev])
+        return { ...(result.broadcast || {}), deliveredCount: result.deliveredCount }
       }
-    }),
+      const roles =
+        data.audienceKey === 'all-trainers'
+          ? ['trainer']
+          : data.audienceKey === 'all'
+            ? ['trainee', 'trainer']
+            : ['trainee']
+      const b = {
+        id: `b${Date.now()}`,
+        title: data.title,
+        body: data.body,
+        type: data.type || 'Training announcement',
+        audience: roles,
+        audienceKey: data.audienceKey || 'all-trainees',
+        audienceLabel: data.audienceLabel || 'All Trainees',
+        region: data.region,
+        station: data.station,
+        date: new Date().toISOString().slice(0, 10),
+        published: true,
+      }
+      setBroadcasts((prev) => [b, ...prev])
+      return b
+    },
+    [backendActive],
   )
 
-  const publishBroadcast = (data) => {
-    const b = {
-      id: `b${Date.now()}`,
-      title: data.title,
-      body: data.body,
-      type: data.type || 'Training announcement',
-      audience: data.audienceLabel || 'All Trainees',
-      audienceKey: data.audience || 'all-trainees',
-      region: data.region,
-      station: data.station,
-      date: new Date().toISOString().slice(0, 10),
-      published: true,
-    }
-    setBroadcasts((prev) => [b, ...prev])
-    return b
-  }
-
-  const value = useMemo(() => ({ broadcasts, publishBroadcast }), [broadcasts])
+  const value = useMemo(
+    () => ({ broadcasts, publishBroadcast }),
+    [broadcasts, publishBroadcast],
+  )
 
   return <BroadcastContext.Provider value={value}>{children}</BroadcastContext.Provider>
 }

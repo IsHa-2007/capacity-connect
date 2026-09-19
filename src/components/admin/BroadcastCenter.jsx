@@ -24,6 +24,8 @@ export default function BroadcastCenter() {
     station: STATIONS[0],
   })
   const [sent, setSent] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
@@ -41,21 +43,34 @@ export default function BroadcastCenter() {
     return 'all-trainees'
   }
 
-  const submit = () => {
+  const submit = async () => {
     if (!form.title.trim() || !form.body.trim()) return
-    publishBroadcast({
-      title: form.title,
-      body: form.body,
-      type: form.type,
-      audience: form.audience,
-      audienceKey: audienceKey(form.audience),
-      audienceLabel: audienceLabel[form.audience],
-      region: form.region,
-      station: form.station,
-    })
-    setShow(false)
-    setSent('Broadcast sent successfully.')
-    setForm({ title: '', body: '', type: 'Training announcement', audience: 'all-trainees', region: 'Northern Region', station: STATIONS[0] })
+    setBusy(true)
+    setError('')
+    try {
+      const result = await publishBroadcast({
+        title: form.title,
+        body: form.body,
+        type: form.type,
+        audience: form.audience,
+        audienceKey: audienceKey(form.audience),
+        audienceLabel: audienceLabel[form.audience],
+        region: form.region,
+        station: form.station,
+      })
+      setShow(false)
+      const delivered = Number(result?.deliveredCount || 0)
+      setSent(
+        delivered
+          ? `Broadcast sent successfully · delivered to ${delivered} recipient${delivered === 1 ? '' : 's'}.`
+          : 'Broadcast sent successfully.',
+      )
+      setForm({ title: '', body: '', type: 'Training announcement', audience: 'all-trainees', region: 'Northern Region', station: STATIONS[0] })
+    } catch (err) {
+      setError(err?.message || 'The broadcast could not be sent. Please try again.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -72,6 +87,9 @@ export default function BroadcastCenter() {
 
       {sent && (
         <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{sent}</div>
+      )}
+      {error && (
+        <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
       )}
 
       <div className="space-y-3">
@@ -97,12 +115,12 @@ export default function BroadcastCenter() {
         ))}
       </div>
 
-      <BroadcastModal open={show} onClose={() => setShow(false)} form={form} set={set} submit={submit} />
+      <BroadcastModal open={show} onClose={() => setShow(false)} form={form} set={set} submit={submit} busy={busy} />
     </div>
   )
 }
 
-function BroadcastModal({ open, onClose, form, set, submit }) {
+function BroadcastModal({ open, onClose, form, set, submit, busy }) {
   return (
     <Modal open={open} onClose={onClose} title="New Broadcast" size="max-w-xl">
       <div className="space-y-4">
@@ -145,7 +163,7 @@ function BroadcastModal({ open, onClose, form, set, submit }) {
         </div>
         <div className="flex justify-end gap-2 border-t border-border-subtle pt-4">
           <Button variant="subtle" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit}><Send size={15} /> Send Broadcast</Button>
+          <Button onClick={submit} disabled={busy}><Send size={15} /> {busy ? 'Sending…' : 'Send Broadcast'}</Button>
         </div>
       </div>
       <style>{`.inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none}.inp:focus{border-color:#4E84B7;background:#fff}`}</style>

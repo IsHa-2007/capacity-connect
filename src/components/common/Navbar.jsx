@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useBroadcasts } from '../../context/BroadcastContext'
 import { useCourses } from '../../context/CourseContext'
 import { getSearchableUsers } from '../../services/userService'
+import * as notificationApi from '../../services/notificationApi'
 import { Avatar } from './ui'
 
 const roleLabel = {
@@ -38,6 +39,7 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
   const searchRef = useRef(null)
 
   const role = currentUser?.role
+  const backendActive = currentUser?.authSource === 'supabase'
   const myBroadcasts = broadcasts.filter(
     (b) =>
       b.published &&
@@ -47,6 +49,58 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
           ? b.audienceKey === 'all-trainers' || b.audienceKey === 'all'
           : b.audienceKey != null),
   )
+
+  // Backend-generated notifications (broadcast fan-out + certificate issuance).
+  // Mock sessions keep deriving their feed from the seeded broadcasts; real
+  // (supabase) sessions read + mutate the authoritative notification store.
+  const [backendNotifs, setBackendNotifs] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  useEffect(() => {
+    if (!backendActive) return
+    let active = true
+    Promise.all([notificationApi.listNotifications(), notificationApi.getUnreadCount()])
+      .then(([list, count]) => {
+        if (!active) return
+        setBackendNotifs(list)
+        setUnreadCount(count)
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[Navbar] Failed to load notifications:', err.message)
+      })
+    return () => {
+      active = false
+    }
+  }, [backendActive])
+
+  const mockNotifs = myBroadcasts.slice(0, 5).map((b) => ({ ...b, isRead: false }))
+  const displayNotifs = backendActive ? backendNotifs : mockNotifs
+  const badgeCount = backendActive ? unreadCount : myBroadcasts.length
+
+  const markAllRead = async () => {
+    if (!backendActive) return
+    try {
+      await notificationApi.markAllNotificationsRead()
+      setBackendNotifs((list) => list.map((n) => ({ ...n, isRead: true })))
+      setUnreadCount(0)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[Navbar] Failed to mark notifications read:', err.message)
+    }
+  }
+
+  const readNotification = async (n) => {
+    if (!backendActive || n.isRead) return
+    try {
+      await notificationApi.markNotificationRead(n.id)
+      setBackendNotifs((list) => list.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)))
+      setUnreadCount((c) => Math.max(0, c - 1))
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[Navbar] Failed to mark notification read:', err.message)
+    }
+  }
 
   const profilePath =
     role === 'ADMIN' ? '/admin/profile' : role === 'TRAINER' ? '/trainer/profile' : '/trainee/profile'
@@ -217,20 +271,46 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
             className="relative rounded-lg p-2 text-slate-body hover:bg-sky-light"
           >
             <Bell size={20} />
-            {myBroadcasts.length > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-rose-500" />}
+            {badgeCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-none text-white">
+                {badgeCount > 9 ? '9+' : badgeCount}
+              </span>
+            )}
           </button>
           {notifOpen && (
             <div className="absolute right-0 mt-2 w-80 rounded-xl border border-border-soft bg-white p-2 shadow-xl">
-              <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-muted">
-                Notifications
-              </p>
-              {myBroadcasts.length ? myBroadcasts.slice(0, 5).map((n) => (
-                <div key={n.id} className="rounded-lg px-3 py-2 hover:bg-sky-soft">
-                  <p className="text-sm font-medium text-primary-deep">{n.title}</p>
-                  <p className="mt-0.5 line-clamp-2 text-xs text-slate-body">{n.body}</p>
-                  <p className="mt-0.5 text-[11px] text-slate-muted">{n.audienceLabel || ''}</p>
+              <div className="flex items-center justify-between px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-muted">
+                  Notifications
+                </p>
+                {backendActive && unreadCount > 0 && (
+                  <button onClick={markAllRead} className="text-xs font-medium text-primary hover:underline">
+                    Mark all read
+                  </button>
+                )}
+              </div>
+              {displayNotifs.length ? (
+                <div className="max-h-96 overflow-y-auto scroll-thin">
+                  {displayNotifs.slice(0, 5).map((n) => (
+                    <button
+                      key={n.id}
+                      onClick={() => readNotification(n)}
+                      className={`block w-full rounded-lg px-3 py-2 text-left hover:bg-sky-soft ${
+                        backendActive && !n.isRead ? 'bg-sky-soft/60' : ''
+                      }`}
+                    >
+                      <p className="flex items-center gap-2 text-sm font-medium text-primary-deep">
+                        {backendActive && !n.isRead && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" />}
+                        {n.title}
+                      </p>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-slate-body">{n.body}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-muted">
+                        {n.createdAt ? formatNotifDate(n.createdAt) : n.audienceLabel || ''}
+                      </p>
+                    </button>
+                  ))}
                 </div>
-              )) : (
+              ) : (
                 <p className="px-3 py-2 text-sm text-slate-muted">No notifications.</p>
               )}
             </div>
@@ -285,4 +365,10 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
       </div>
     </header>
   )
+}
+
+function formatNotifDate(value) {
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })
 }

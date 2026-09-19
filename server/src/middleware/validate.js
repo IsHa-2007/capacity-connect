@@ -17,14 +17,32 @@ function safeShape(value) {
   return out
 }
 
+export function formatIssues(error) {
+  return error.issues.map((issue) => ({
+    path: issue.path.join('.') || '(root)',
+    message: issue.message,
+  }))
+}
+
+// Parses `value` and returns the data, throwing the standard 400 envelope on
+// failure. Used by controllers for request sources the middleware cannot assign
+// (Express 5 exposes req.query through a getter).
+export function parseOrThrow(schema, value, source = 'body') {
+  const result = schema.safeParse(value)
+  if (!result.success) {
+    if (env.NODE_ENV !== 'production') {
+      console.warn(`[validation] ${source} rejected:`, JSON.stringify(safeShape(value)))
+    }
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request data.', formatIssues(result.error))
+  }
+  return result.data
+}
+
 export function validate(schema, source = 'body') {
   return (req, _res, next) => {
     const result = schema.safeParse(req[source])
     if (!result.success) {
-      const details = result.error.issues.map((issue) => ({
-        path: issue.path.join('.') || '(root)',
-        message: issue.message,
-      }))
+      const details = formatIssues(result.error)
       // Development-only diagnostics: log the exact issues and a redacted body
       // shape so a contract mismatch is obvious from the terminal.
       if (env.NODE_ENV !== 'production') {
