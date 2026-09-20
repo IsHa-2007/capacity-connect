@@ -11,8 +11,8 @@
 //   [5] storage.service constants match (STORAGE_BUCKET export)
 // ---------------------------------------------------------------------------
 
-import { readFileSync, existsSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { existsSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
@@ -61,7 +61,7 @@ else console.log('      OK — bucket is reachable and writable')
 
 // [3] signed URL on that object
 if (!upErr) {
-  const { data: su, error: suErr } = await B.createSignedUrl(probePath, 60)
+  const { error: suErr } = await B.createSignedUrl(probePath, 60)
   if (suErr) console.log(`  [3] createSignedUrl: ERR ${suErr.statusCode} ${suErr.message}`)
   else console.log(`  [3] createSignedUrl: OK (signed for 60s)`)
 }

@@ -259,7 +259,7 @@ function CreateCourseModal({ open, onClose, onCreate, createCourse }) {
           </Button>
         </div>
       </div>
-      <style>{`.inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none}.inp:focus{border-color:#4E84B7;background:#fff}`}</style>
+      <style>{`.inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none}.inp:focus{border-color:#168c9b;background:#fff}`}</style>
     </Modal>
   )
 }

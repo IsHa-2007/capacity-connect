@@ -121,11 +121,11 @@ export default function EnrollmentModal({ course, open, onClose }) {
           </div>
 
           <div className="mt-4 rounded-xl border border-blue-100 bg-white p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Dynamic Assessment Formula</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Dynamic Assessment</p>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-body">
-              <Badge tone="green">20% Easy</Badge>
-              <Badge tone="amber">30% Medium</Badge>
-              <Badge tone="navy">50% Hard</Badge>
+              <Badge tone="green">Exactly 20 questions</Badge>
+              <Badge tone="amber">Drawn from valid bank</Badge>
+              <Badge tone="navy">Shuffled randomly</Badge>
               <span className="text-slate-muted">·</span>
               <Badge tone="slate">Correct +1</Badge>
               <Badge tone="slate">Wrong −0.25</Badge>

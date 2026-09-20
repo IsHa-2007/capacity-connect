@@ -9,9 +9,17 @@
 //   * NC-trust     the question set, snapshot, scoring inputs, score, percentage
 //                  and pass/fail are computed HERE. A client can never supply
 //                  correct/incorrect counts, raw score, percentage or passed.
-//   * Distribution the assessment is generated server-side using the frozen
-//                  20/30/50 EASY/MEDIUM/HARD split over a documented constant
-//                  size (20 — matches the existing app's examGenerator default).
+//   * Distribution the assessment is generated server-side as EXACTLY the
+//                  documented constant size (20 — matches the existing app's
+//                  examGenerator default) using the available valid question
+//                  bank. When the bank has fewer valid questions than 20 the
+//                  same questions are recycled into distinct instances (each
+//                  with an opaque instanceId) so the exam NEVER shrinks and
+//                  repeated questions remain independently answerable. A bank
+//                  with ZERO valid questions refuses to start with a clean 409.
+//                  The actual EASY/MEDIUM/HARD mix is computed over the frozen
+//                  20 instances (see computeDistribution) — the old 20/30/50
+//                  minimum-pool prerequisite is GONE.
 //   * Snapshot     at START the exact question set (incl. correct answers) is
 //                  frozen into assessment_attempts.questions_snapshot; SUBMIT
 //                  scores against that snapshot, never against live bank rows.
@@ -62,13 +70,47 @@ export function resolveAssessmentTimeLimitSeconds(course) {
   return minutes * 60
 }
 
-// Deterministic 20/30/50 split for a target size. Rounding matches the existing
-// generator (round() on easy/medium, remainder to hard) so the counts always
-// sum back to `total`.
+// Reference 20/30/50 split sizing (matches the existing generator's rounding).
+// It is no longer a hard prerequisite — with a small bank the assessment recycles
+// questions automatically. Kept exported for tests and informational snapshots.
 export function assessmentDistribution(total = ASSESSMENT_QUESTION_COUNT) {
   const easy = Math.round(total * 0.2)
   const medium = Math.round(total * 0.3)
   const hard = total - easy - medium
+  return { easy, medium, hard }
+}
+
+// Builds EXACTLY `total` question instances from the valid bank. With fewer
+// valid questions than `total` the bank is recycled (cycle) so the exam always
+// has the full length; each instance carries a distinct `instanceId` so repeated
+// questions stay independently answerable. The final list is shuffled. Returns
+// an empty array only when the bank is empty (caller blocks with a 409).
+export function buildAssessmentInstances(bank, total = ASSESSMENT_QUESTION_COUNT) {
+  if (!bank || bank.length === 0) return []
+  const shuffled = shuffle(bank)
+  const instances = []
+  for (let i = 0; i < total; i++) {
+    const source = shuffled[i % shuffled.length]
+    instances.push({
+      instanceId: `${source.id}#${i}`,
+      id: source.id,
+      text: source.text,
+      options: source.options,
+      difficulty: source.difficulty,
+      topic: source.topic ?? null,
+      tagLabel: source.tagLabel ?? null,
+      questionType: 'MCQ',
+      correctOptionIndex: source.correctOptionIndex,
+    })
+  }
+  return shuffle(instances)
+}
+
+// Actual difficulty mix over the frozen instances (always sums to the exam size).
+export function computeDistribution(questions = []) {
+  const easy = questions.filter((q) => q.difficulty === 'EASY').length
+  const medium = questions.filter((q) => q.difficulty === 'MEDIUM').length
+  const hard = questions.filter((q) => q.difficulty === 'HARD').length
   return { easy, medium, hard }
 }
 
@@ -97,9 +139,11 @@ function shuffle(items) {
 }
 
 // Pure scoring against a frozen snapshot. `answers` is a map of
-// questionId → optionIndex (null/absent = unattempted). Returns the exact
-// Module 10 maths: +1 correct, −0.25 incorrect, 0 unattempted, percentage over
-// the maximum possible score, passed ⇔ percentage >= 75.
+// questionKey → optionIndex (null/absent = unattempted), where questionKey is
+// the instance's `instanceId` (or legacy `id` when the attempt predates the
+// instance feature). Returns the exact Module 10 maths: +1 correct, −0.25
+// incorrect, 0 unattempted, percentage over the maximum possible score, passed
+// ⇔ percentage >= 75.
 export function scoreSnapshot(snapshotQuestions, answerMap) {
   let correct = 0
   let incorrect = 0
@@ -107,7 +151,7 @@ export function scoreSnapshot(snapshotQuestions, answerMap) {
   let raw = 0
 
   for (const q of snapshotQuestions || []) {
-    const given = answerMap?.[q.id]
+    const given = answerMap?.[q.instanceId || q.id]
     if (given === null || given === undefined) {
       unattempted++
       continue
@@ -172,48 +216,24 @@ export async function startAssessment(actor, enrollmentId) {
   // Whole valid question bank (repository filters is_valid; we re-verify shape).
   const bank = (await listQuestionsForCourse(course.id, { validOnly: true })).filter(isQuestionEligible)
 
-  const distribution = assessmentDistribution(ASSESSMENT_QUESTION_COUNT)
-  const pools = {
-    EASY: bank.filter((q) => q.difficulty === 'EASY'),
-    MEDIUM: bank.filter((q) => q.difficulty === 'MEDIUM'),
-    HARD: bank.filter((q) => q.difficulty === 'HARD'),
+  // Zero valid questions → clean 409 block. We NEVER fabricate questions and we
+  // NEVER shrink the exam below its documented size.
+  if (bank.length === 0) {
+    throw new ApiError(
+      409,
+      'QUESTION_BANK_EMPTY',
+      'This course has no valid questions yet. Your trainer needs to add valid questions to the question bank before the assessment can be generated.',
+    )
   }
 
-  // Insufficient bank → clean server error; never silently shrink the exam.
-  for (const difficulty of DIFFICULTIES) {
-    const required = distribution[difficulty.toLowerCase()]
-    if (pools[difficulty].length < required) {
-      throw new ApiError(
-        409,
-        'QUESTION_BANK_INSUFFICIENT',
-        `The course question bank is insufficient for an assessment: needs ${required} ${difficulty} ` +
-          `question(s) but only has ${pools[difficulty].length}. ` +
-          'Add more valid questions before starting the assessment.',
-      )
-    }
-  }
-
-  // Randomize per-difficulty selection, then randomize overall order.
-  const selected = shuffle([
-    ...shuffle(pools.EASY).slice(0, distribution.easy),
-    ...shuffle(pools.MEDIUM).slice(0, distribution.medium),
-    ...shuffle(pools.HARD).slice(0, distribution.hard),
-  ])
-
-  // Freeze the exact question set (correctOptionIndex included) at START so a
-  // later bank edit can never change what this attempt is scored against.
-  const snapshotQuestions = selected.map((q) => ({
-    id: q.id,
-    text: q.text,
-    options: q.options,
-    difficulty: q.difficulty,
-    topic: q.topic ?? null,
-    tagLabel: q.tagLabel ?? null,
-    questionType: 'MCQ',
-    correctOptionIndex: q.correctOptionIndex,
-  }))
+  // EXACTLY `ASSESSMENT_QUESTION_COUNT` instances — recycling a small bank
+  // instead of refusing to start. Each instance is distinct (instanceId keyed),
+  // randomized, and frozen into the snapshot at START so a later bank edit can
+  // never change what this attempt is scored against.
+  const snapshotQuestions = buildAssessmentInstances(bank, ASSESSMENT_QUESTION_COUNT)
+  const distribution = computeDistribution(snapshotQuestions)
   const snapshot = {
-    version: 1,
+    version: 2,
     distribution,
     questions: snapshotQuestions,
   }
@@ -231,7 +251,8 @@ export async function startAssessment(actor, enrollmentId) {
     courseId: attempt.courseId,
     distribution,
     timeLimitSeconds: resolveAssessmentTimeLimitSeconds(course),
-    questions: snapshotQuestions.map(({ id, text, options, difficulty, topic, tagLabel, questionType }) => ({
+    questions: snapshotQuestions.map(({ instanceId, id, text, options, difficulty, topic, tagLabel, questionType }) => ({
+      instanceId,
       id,
       text,
       options,
@@ -266,20 +287,32 @@ export async function submitAssessment(actor, enrollmentId, attemptId, input) {
 
   const snapshot = attempt.questionsSnapshot || {}
   const snapshotQuestions = Array.isArray(snapshot.questions) ? snapshot.questions : []
-  const validIds = new Set(snapshotQuestions.map((q) => q.id))
+  // Map every instance by its unique key (instanceId when present, falling back
+  // to the legacy question id for snapshots that predate the instance feature).
+  const questionByKey = new Map()
+  for (const q of snapshotQuestions) {
+    questionByKey.set(q.instanceId ? String(q.instanceId) : String(q.id), q)
+  }
+  const keyFor = (answer) => (answer.instanceId ? String(answer.instanceId) : answer.questionId ? String(answer.questionId) : null)
 
   // Build the answer map. optionIndex is validated against the SNAPSHOT option
-  // count, and every questionId must belong to THIS attempt's frozen question set.
+  // count, and every key must belong to THIS attempt's frozen question set.
   const answerMap = {}
   for (const answer of input.answers || []) {
-    if (!validIds.has(answer.questionId)) {
+    const key = keyFor(answer)
+    let question = key ? questionByKey.get(key) : null
+    // Legacy fallback: an old client may submit only questionId against a new
+    // instance snapshot — resolve to the FIRST instance holding that question.
+    if (!question && answer.questionId) {
+      question = snapshotQuestions.find((q) => String(q.id) === String(answer.questionId))
+    }
+    if (!question) {
       throw new ApiError(
         400,
         'ATTEMPT_UNKNOWN_QUESTION',
-        `Question ${answer.questionId} is not part of this assessment attempt.`,
+        `Question ${key || answer.questionId} is not part of this assessment attempt.`,
       )
     }
-    const question = snapshotQuestions.find((q) => q.id === answer.questionId)
     if (
       answer.optionIndex === null ||
       answer.optionIndex === undefined ||
@@ -289,10 +322,10 @@ export async function submitAssessment(actor, enrollmentId, attemptId, input) {
       throw new ApiError(
         400,
         'ATTEMPT_INVALID_OPTION',
-        `optionIndex for question ${answer.questionId} is out of range.`,
+        `optionIndex for question ${key} is out of range.`,
       )
     }
-    answerMap[answer.questionId] = answer.optionIndex
+    answerMap[key] = answer.optionIndex
   }
 
   const result = scoreSnapshot(snapshotQuestions, answerMap)

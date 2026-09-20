@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { ArrowRight, CheckCheck, ExternalLink, Eye, PlayCircle } from 'lucide-react'
-import { Button, Card, Badge } from '../../common/ui'
+import { CheckCheck, ExternalLink, Eye, PlayCircle } from 'lucide-react'
+import { Card, Badge } from '../../common/ui'
 import InAppFileViewer from '../../profile/InAppFileViewer'
 
 // Video Lectures section: lists trainer-provided video links OR uploaded video
-// files. Always accessible; friendly empty state when none have been provided.
-export default function VideoSection({ course, done, onComplete }) {
+// files. Opening the section auto-marks the corresponding material step as
+// viewed via the backend progress API (idempotent) — it does NOT claim the
+// entire video was watched, hence the honest "Viewed"/"Completed" wording.
+export default function VideoSection({ course, done, completing }) {
   const videos = course.videos || []
   const [viewing, setViewing] = useState(null)
   const [watched, setWatched] = useState(() => new Set(done ? videos.map((_, i) => i) : []))
@@ -30,7 +32,14 @@ export default function VideoSection({ course, done, onComplete }) {
           </h3>
           <p className="text-sm text-slate-muted">Recorded lectures and links selected by the trainer.</p>
         </div>
-        {videos.length ? <Badge>{videos.length} video{videos.length === 1 ? '' : 's'}</Badge> : null}
+        <div className="flex items-center gap-2">
+          {videos.length ? <Badge>{videos.length} video{videos.length === 1 ? '' : 's'}</Badge> : null}
+          {done ? (
+            <Badge tone="green"><CheckCheck size={13} /> Viewed</Badge>
+          ) : completing ? (
+            <Badge tone="blue">Marking as viewed…</Badge>
+          ) : null}
+        </div>
       </div>
 
       {videos.length ? (
@@ -84,14 +93,6 @@ export default function VideoSection({ course, done, onComplete }) {
         <div className="mt-5 rounded-xl border border-dashed border-border-soft bg-sky-soft p-6 text-center">
           <p className="text-sm text-slate-muted">No video lectures available yet.</p>
           <p className="mt-1 text-xs text-slate-muted">The trainer has not uploaded any video lectures for this course. Check back later.</p>
-        </div>
-      )}
-
-      {videos.length > 0 && !done && onComplete && (
-        <div className="mt-5 flex justify-end border-t border-border-subtle pt-4">
-          <Button onClick={onComplete}>
-            Mark Video Lectures as Reviewed <ArrowRight size={16} />
-          </Button>
         </div>
       )}
 

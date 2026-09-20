@@ -283,7 +283,7 @@ function EditCourseModal({ course, open, onClose, onSave }) {
           <Button onClick={submit}><Save size={15} /> Save Changes</Button>
         </div>
       </div>
-      <style>{`.inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none}.inp:focus{border-color:#4E84B7;background:#fff}`}</style>
+      <style>{`.inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none}.inp:focus{border-color:#168c9b;background:#fff}`}</style>
     </Modal>
   )
 }
@@ -637,7 +637,7 @@ function QuestionBank({ course }) {
         {counts.map(({ d, n }) => (
           <Badge key={d} tone={d === 'easy' ? 'green' : d === 'medium' ? 'amber' : 'navy'}>{n} {d}</Badge>
         ))}
-        <span className="text-xs text-slate-muted">· targets 20:30:50 assessment</span>
+        <span className="text-xs text-slate-muted">· every assessment is exactly 20 questions</span>
         {readiness.warnings.length > 0 && (
           <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
             <AlertTriangle size={12} /> balanced coverage recommended
@@ -761,7 +761,7 @@ function QuestionForm({ course, question, onClose, onSave }) {
           <Button onClick={submit}>{question ? 'Save Changes' : 'Add Question'}</Button>
         </div>
       </div>
-      <style>{`.inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none}.inp:focus{border-color:#4E84B7;background:#fff}`}</style>
+      <style>{`.inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none}.inp:focus{border-color:#168c9b;background:#fff}`}</style>
     </Modal>
   )
 }

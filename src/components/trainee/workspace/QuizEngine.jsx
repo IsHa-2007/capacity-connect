@@ -94,9 +94,16 @@ export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
     }
     // The backend treats an ABSENT question as "unattempted" (0 marks). A null
     // optionIndex would fail the zod int schema with a 400, so unanswered
-    // questions are omitted from the payload entirely.
+    // questions are omitted from the payload entirely. Each answered question is
+    // addressed by its INSTANCE id — a 20-instance exam may legally repeat a
+    // question, and only the per-instance identity keeps repeated questions
+    // independently answerable (questionId is only a legacy fallback).
     const answersPayload = assessment.questions
-      .map((q, i) => ({ questionId: q.id, optionIndex: answers[i] }))
+      .map((q, i) => ({
+        instanceId: q.instanceId,
+        questionId: q.instanceId ? undefined : q.id,
+        optionIndex: answers[i],
+      }))
       .filter((a) => a.optionIndex !== null)
     const elapsed = (assessment.timeLimitSeconds ?? ASSESSMENT_TIME_SECONDS) - Math.max(0, timeLeft)
     try {
@@ -178,7 +185,7 @@ export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-sky-light text-primary"><FileCheck size={18} /></span>
             <div>
               <h3 className="font-semibold text-primary-deep">Final Assessment</h3>
-              <p className="text-xs text-slate-muted">Server-generated question set</p>
+              <p className="text-xs text-slate-muted">Question {current + 1} of {assessment.questions.length} · {assessment.questions.length} server-generated questions</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -301,9 +308,9 @@ function IntroView({ onStart, error, existing }) {
         </p>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          <RuleCard title="Composition" lines={[`20% Easy`, `30% Medium`, `50% Hard`]} />
+          <RuleCard title="Composition" lines={[`Exactly 20 questions`, `Random & shuffled`, `Recycled if the bank is small`]} />
           <RuleCard title="Marking" lines={[`Correct +1`, `Wrong −0.25`, `Unattempted 0`]} />
-          <RuleCard title="Requirements" lines={[`20 minutes`, `20 questions`, `Pass ≥ 75%`]} />
+          <RuleCard title="Requirements" lines={[`20 minutes`, `Pass ≥ 75%`, `20 questions`]} />
         </div>
 
         <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">

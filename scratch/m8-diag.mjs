@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // READ-ONLY DIAGNOSTIC — capacity-connect storage bucket + Module 8 tables
-import { readFileSync, existsSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { existsSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import { createClient } from '@supabase/supabase-js'
@@ -47,7 +47,7 @@ console.log(`  [2] upload('${probePath}'): ${upErr ? 'ERR ' + upErr.message : 'O
 
 // [3] createSignedUrl on the object (proves signed-URL path works)
 if (!upErr) {
-  const { data: su, error: suErr } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(probePath, 60)
+  const { error: suErr } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(probePath, 60)
   console.log(`  [3] createSignedUrl: ${suErr ? 'ERR ' + suErr.message : 'OK (signed for 60s)'}`)
 }
 

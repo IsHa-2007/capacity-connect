@@ -19,6 +19,7 @@ import { ApiError } from '../utils/apiResponse.js'
 import * as repo from '../repositories/enrollment.repository.js'
 import { ROLE_TRAINEE, ROLE_TRAINER, ROLE_ADMIN, isApproved } from '../lib/roles.js'
 import { createSignedUrl } from '../services/storage.service.js'
+import { listQuestionsForCourse } from '../repositories/course.repository.js'
 
 // Frozen statuses contract (see enrollment.validator — never drift).
 export const ENROLLMENT_STATUSES = ['ENROLLED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']
@@ -58,6 +59,61 @@ export const MATERIALS_COMPLETE_PROGRESS = 75
 
 export function keyForMaterialType(sectionType) {
   return SECTION_TYPE_TO_KEY[sectionType] || null
+}
+
+// ---------------------------------------------------------------------------
+// PRACTICE QUESTION BANK (Module 10 §practice)
+//
+// Practice is NOT a second question system and NEVER feeds the assessment. It is
+// a capped, shuffled subset of the course's SAME valid bank (validOnly +
+// structural re-check), delivered with its correct answers because practice is a
+// training tool. Rules:
+//   * at least 5 valid questions → a subset of 5–10 shuffled questions;
+//   * fewer than 5 valid questions    → every valid question (may be 1–4);
+//   * zero valid questions            → an honest empty array (UI prints the
+//     friendly "No practice questions are available yet…" empty state).
+// ---------------------------------------------------------------------------
+
+const PRACTICE_DIFFICULTIES = ['EASY', 'MEDIUM', 'HARD']
+
+function isPracticeQuestion(q) {
+  if (!q) return false
+  if (q.is_valid !== true) return false
+  if (typeof q.text !== 'string' || !q.text.trim()) return false
+  if (q.questionType && q.questionType !== 'MCQ') return false
+  if (!Array.isArray(q.options) || q.options.length < 2) return false
+  const idx = q.correctOptionIndex
+  if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0 || idx >= q.options.length) return false
+  return PRACTICE_DIFFICULTIES.includes(q.difficulty)
+}
+
+function shuffle(items) {
+  const arr = [...items]
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
+}
+
+export function buildPracticeSet(bank, max = 10, min = 5) {
+  const available = shuffle(bank)
+  if (available.length >= min) return available.slice(0, max)
+  return available
+}
+
+// Maps a valid bank row to the public practice shape (answers included).
+export function toPracticeQuestion(q) {
+  return {
+    id: q.id,
+    text: q.text,
+    options: q.options,
+    difficulty: q.difficulty,
+    topic: q.topic ?? null,
+    tagLabel: q.tagLabel ?? null,
+    questionType: 'MCQ',
+    correctOptionIndex: q.correctOptionIndex,
+  }
 }
 
 // Builds the authoritative progression plan for a course from its REAL
@@ -578,6 +634,12 @@ export async function getWorkspace(actor, enrollmentId) {
     materials[bucket].push(await materialFor(section))
   }
 
+  // Practice draws from the course's REAL valid question bank: a capped subset
+  // shipped with its answers (training tool), never a second bank, never an
+  // assessment attempt. Zero valid questions → an honest empty array.
+  const validBank = (await listQuestionsForCourse(course.id, { validOnly: true })).filter(isPracticeQuestion)
+  const practiceQuestions = buildPracticeSet(validBank).map(toPracticeQuestion)
+
   // Module 11 derived state: authoritative progress, per-type completion
   // compatibility flags, assessment + feedback + completion visibility.
   const plan = deriveProgressPlan(sections)
@@ -597,6 +659,7 @@ export async function getWorkspace(actor, enrollmentId) {
     },
     course,
     materials,
+    practiceQuestions,
     progress: {
       value: progress,
       materialsThreshold: plan.threshold,

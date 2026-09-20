@@ -429,7 +429,7 @@ export function courseReadiness(course) {
   const hard = countFor('hard')
   if (easy < 1 || medium < 1 || hard < 1) {
     warnings.push(
-      `The Question Bank has no ${[['easy', easy], ['medium', medium], ['hard', hard]].filter(([, n]) => n < 1).map(([d]) => d).join('/')} question. A balanced 20:30:50 assessment gives a richer test — consider adding questions across all three difficulty levels.`,
+      `The Question Bank has no ${[['easy', easy], ['medium', medium], ['hard', hard]].filter(([, n]) => n < 1).map(([d]) => d).join('/')} question. Every assessment is exactly 20 questions drawn from the valid bank — adding questions across all three difficulty levels gives a richer test.`,
     )
   }
   return { ok: errors.length === 0, errors, warnings }

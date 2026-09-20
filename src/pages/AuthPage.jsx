@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { CloudSun, Lock, Mail, MapPin, ShieldCheck, UserRound } from 'lucide-react'
+import { CloudSun, Eye, EyeOff, Lock, Mail, MapPin, ShieldCheck, UserRound } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { STATIONS, EXPERTISE_OPTIONS } from '../data/mockData'
 
@@ -12,6 +12,7 @@ export default function AuthPage() {
   const [mode, setMode] = useState(initialMode)
   const [error, setError] = useState('')
   const [flash, setFlash] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [form, setForm] = useState({
     email: '',
     password: '',
@@ -239,7 +240,25 @@ export default function AuthPage() {
             </div>
             <div className="relative">
               <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-muted" size={16} />
-              <input required value={form.password} onChange={set('password')} type="password" placeholder="Password" className={inputCls} />
+              <input
+                required
+                value={form.password}
+                onChange={set('password')}
+                type={showPassword ? 'text' : 'password'}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                placeholder="Password"
+                className="w-full rounded-lg border border-border-soft bg-sky-soft py-2.5 pl-10 pr-10 text-sm text-slate-deep outline-none placeholder:text-slate-muted focus:border-secondary focus:bg-white"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                title={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-slate-muted transition-colors hover:text-primary"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
 
             <button

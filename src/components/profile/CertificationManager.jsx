@@ -295,7 +295,7 @@ function CertForm({ open, editing, onSave, busy, onClose, showDescription = true
           <Button onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Save Certification'}</Button>
         </div>
       </div>
-      <style>{`.pf-inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none;color:#1F5F93}.pf-inp:focus{border-color:#4E84B7;background:#fff}`}</style>
+      <style>{`.pf-inp{width:100%;border-radius:0.5rem;border:1px solid #DCE6F0;background:#F5F8FC;padding:0.5rem 0.75rem;font-size:0.875rem;outline:none;color:#004aad}.pf-inp:focus{border-color:#168c9b;background:#fff}`}</style>
     </Modal>
   )
 }

@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { ArrowRight, CheckCheck, Eye, Presentation } from 'lucide-react'
-import { Button, Card, Badge } from '../../common/ui'
+import { CheckCheck, Eye, Presentation } from 'lucide-react'
+import { Card, Badge } from '../../common/ui'
 import InAppFileViewer from '../../profile/InAppFileViewer'
 
 // Slide Decks section: lists the trainer-uploaded slide/PDF files for the course.
-// Always accessible; friendly empty state when none have been uploaded.
-export default function PPTSection({ course, done, onComplete }) {
+// Opening the section auto-marks the corresponding material step as read via the
+// backend progress API (idempotent). ✓ Read shows only after backend confirmation.
+export default function PPTSection({ course, done, completing }) {
   const [viewing, setViewing] = useState(null)
 
   return (
@@ -17,7 +18,11 @@ export default function PPTSection({ course, done, onComplete }) {
           </h3>
           <p className="text-sm text-slate-muted">Presentation decks shared by the trainer for {course.title}.</p>
         </div>
-        {done && <Badge tone="green"><CheckCheck size={13} /> Slides reviewed</Badge>}
+        {done ? (
+          <Badge tone="green"><CheckCheck size={13} /> Read</Badge>
+        ) : completing ? (
+          <Badge tone="blue">Marking as read…</Badge>
+        ) : null}
       </div>
 
       {course.slides && course.slides.length ? (
@@ -44,14 +49,6 @@ export default function PPTSection({ course, done, onComplete }) {
         <div className="mt-5 rounded-xl border border-dashed border-border-soft bg-sky-soft p-6 text-center">
           <p className="text-sm text-slate-muted">No slide decks available yet.</p>
           <p className="mt-1 text-xs text-slate-muted">The trainer has not uploaded slide decks for this course. Check back later.</p>
-        </div>
-      )}
-
-      {course.slides && course.slides.length > 0 && !done && onComplete && (
-        <div className="mt-5 flex justify-end border-t border-border-subtle pt-4">
-          <Button onClick={onComplete}>
-            Mark Slide Decks as Reviewed <ArrowRight size={16} />
-          </Button>
         </div>
       )}
 

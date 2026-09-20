@@ -4,15 +4,24 @@ import { Button, Card, Badge } from '../../common/ui'
 import InAppFileViewer from '../../profile/InAppFileViewer'
 
 // Practice Sets section: shows trainer-uploaded practice files plus an untimed
-// practice quiz drawn from the course question bank. Always accessible.
+// practice quiz drawn from the course's REAL valid question bank (delivered by
+// the backend in the workspace). Always accessible.
 export default function PracticeSection({ course, done, onComplete, onProceedToAssessment }) {
-  const bank = course.bank || []
+  const bank = (course.practiceQuestions || []).map((q) => ({
+    id: q.id,
+    text: q.text,
+    options: Array.isArray(q.options) ? q.options : [],
+    answer: Number(q.correctOptionIndex),
+    difficulty: String(q.difficulty || '').toLowerCase(),
+    topic: q.topic || q.tagLabel || '',
+  }))
   const practiceFiles = course.practice || []
-  const subset = bank.slice(0, 5)
+  const subset = bank
   const [answers, setAnswers] = useState({})
   const [revealed, setRevealed] = useState(false)
   const [viewing, setViewing] = useState(null)
   const correct = subset.filter((q, i) => answers[i] === q.answer).length
+  const difficultyLabel = (d) => (d === 'easy' ? 'Easy' : d === 'medium' ? 'Medium' : d === 'hard' ? 'Hard' : 'Hard')
 
   const reset = () => {
     setAnswers({})
@@ -55,9 +64,9 @@ export default function PracticeSection({ course, done, onComplete, onProceedToA
             <h3 className="flex items-center gap-2 font-semibold text-primary-deep">
               <ClipboardCheck size={18} className="text-primary" /> Practice Quiz
             </h3>
-            <p className="text-sm text-slate-muted">Untimed practice from the question bank. This does not count toward your final assessment.</p>
+            <p className="text-sm text-slate-muted">Untimed practice from the course question bank. This does not count toward your final assessment.</p>
           </div>
-          <Badge tone="blue">{bank.length} questions in bank</Badge>
+          <Badge tone="blue">{bank.length} practice question{bank.length === 1 ? '' : 's'}</Badge>
         </div>
 
         {subset.length ? (
@@ -67,7 +76,7 @@ export default function PracticeSection({ course, done, onComplete, onProceedToA
                 <div key={q.id || qi} className="rounded-xl border border-border-subtle bg-sky-soft p-4">
                   <div className="flex items-start gap-2">
                     <Badge tone={q.difficulty === 'easy' ? 'green' : q.difficulty === 'medium' ? 'amber' : 'navy'}>
-                      {q.difficulty}
+                      {difficultyLabel(q.difficulty)}
                     </Badge>
                     <p className="text-sm font-medium text-primary-deep">Q{qi + 1}. {q.text}</p>
                   </div>
@@ -136,8 +145,7 @@ export default function PracticeSection({ course, done, onComplete, onProceedToA
           </>
         ) : (
           <div className="mt-5 rounded-xl border border-dashed border-border-soft bg-sky-soft p-6 text-center">
-            <p className="text-sm text-slate-muted">No practice questions available yet.</p>
-            <p className="mt-1 text-xs text-slate-muted">The trainer has not added questions to the practice/assessment bank for this course.</p>
+            <p className="text-sm text-slate-body">No practice questions are available yet. Your trainer has not added valid questions to this course.</p>
           </div>
         )}
       </Card>

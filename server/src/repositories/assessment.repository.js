@@ -64,13 +64,16 @@ export function mapAttemptRow(row) {
 // Maps attempts to the PUBLIC (trainee-safe) shape. Question text/options are
 // surfaced only for the questions the trainee already answered; correctOptionIndex
 // is ALWAYS stripped so an answer key can never leak through attempt history.
-export function mapAttemptRowPublic(row) {
-  if (!row) return null
-  const attempt = mapAttemptRow(row)
+// Consumes a `mapAttemptRow` result (camelCase) — listAttemptsForEnrollment
+// already maps rows, so re-running mapAttemptRow here would double-map and wipe
+// every column except the few whose names coincide (snake_case vs camelCase).
+export function mapAttemptRowPublic(attempt) {
+  if (!attempt) return null
   const snapshot = attempt.questionsSnapshot || {}
   const questions = Array.isArray(snapshot.questions)
     ? snapshot.questions.map((q) => ({
         id: q.id,
+        instanceId: q.instanceId || null,
         text: q.text,
         difficulty: q.difficulty,
         topic: q.topic ?? null,

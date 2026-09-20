@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   AlertCircle,
@@ -75,6 +75,14 @@ export default function CourseWorkspace() {
   const [notice, setNotice] = useState(null)
   const [enrollments, setEnrollments] = useState(null) // null = still loading
   const [loadingWorkspace, setLoadingWorkspace] = useState(false)
+  // Auto-completion triggers ONLY when the trainee actually opens a material tab
+  // (a deliberate click), never on render/refresh — see markMaterialOpened below.
+  const materialOpenedRef = useRef(false)
+  const [completing, setCompleting] = useState(false)
+  const completingRef = useRef(false)
+  // Material tabs that auto-complete when OPENED (Notes/Slides/Video). Practice
+  // is deliberately excluded: it keeps its own interaction + state transitions.
+  const AUTO_COMPLETE_TABS = ['notes', 'slides', 'video']
 
   // The enrolled-courses list is backend-driven — the backend enrollment rows
   // are the single source for how much of each course has been completed.
@@ -112,7 +120,7 @@ export default function CourseWorkspace() {
         if (!cancelled) setWorkspaces((prev) => (prev[enrollmentId] === ws ? prev : { ...prev, [enrollmentId]: ws }))
       })
       .catch((err) => {
-        if (!cancelled) setNotice(err?.message || 'Could not load the workspace.')
+        if (!cancelled) setNotice({ message: err?.message || 'Could not load the workspace.' })
       })
       .finally(() => {
         if (!cancelled) setLoadingWorkspace(false)
@@ -134,10 +142,60 @@ export default function CourseWorkspace() {
       )
       return ws
     } catch (err) {
-      setNotice(err?.message || 'Could not refresh your progress.')
+      setNotice({ message: err?.message || 'Could not refresh your progress.' })
       return null
     }
   }
+
+  // Section completion routes through the backend's authoritative ordered gate
+  // (POST /enrollments/:id/progress). The backend only lets a section complete
+  // once every section ordered BEFORE it is done, and the plan is flattened in
+  // GLOBAL order across all material tabs (the lecturer may have uploaded the
+  // tabs interleaved). So instead of bulk-marking every section of the current
+  // tab (which deadlocks on a 409 for the very first click), we advance the
+  // FIRST not-yet-complete section of the global plan — whatever its tab — and
+  // refresh the server state. Repeating it walks the ledger to completion, so
+  // progress always moves forward and the Assessment gate can never stay locked.
+  const markStepComplete = async (sectionId) => {
+    if (!enrollmentId || completingRef.current) return
+    setNotice(null)
+    completingRef.current = true
+    setCompleting(true)
+    try {
+      await enrollmentApi.markSectionComplete(enrollmentId, sectionId)
+      await refreshWorkspace()
+    } catch (err) {
+      await refreshWorkspace()
+      setNotice({
+        message: err?.message || 'Your progress could not be updated right now.',
+        retry: () => markStepComplete(sectionId),
+      })
+    } finally {
+      completingRef.current = false
+      setCompleting(false)
+    }
+  }
+
+  const completeStep = async () => {
+    if (!workspace) return
+    const plan = workspace.progress?.sectionPlan || []
+    const value = workspace.progress?.value ?? workspace.enrollment?.progress ?? 0
+    const firstIncomplete = plan.find((s) => (value ?? 0) < s.milestone)
+    if (!firstIncomplete) return
+    await markStepComplete(firstIncomplete.sectionId)
+  }
+
+  // Auto-completion of Notes/Slides/Video: fires ONCE per deliberate user OPEN
+  // of an auto-complete material tab (the click sets materialOpenedRef; rendering
+  // or a refresh never re-triggers it). It advances the FIRST not-yet-complete
+  // section of the global plan, so the backend's ordered gate can never 409.
+  useEffect(() => {
+    if (!AUTO_COMPLETE_TABS.includes(activeTab)) return
+    if (!materialOpenedRef.current) return
+    materialOpenedRef.current = false
+    completeStep()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, enrollmentId, workspace])
 
   // No courseId selected → show the enrolled-courses card list.
   if (!courseId) {
@@ -208,7 +266,16 @@ export default function CourseWorkspace() {
     practice: (materials.practice || []).map(toUiMaterial),
   }
   // The material sections read `course.<key>`; give them the backend materials.
-  const contentCourse = { ...course, notes: content.notes, slides: content.slides, videos: content.videos, practice: content.practice }
+  // `practiceQuestions` carry the course's REAL valid bank subset (with answers)
+  // that the PracticeSection quiz draws from.
+  const contentCourse = {
+    ...course,
+    notes: content.notes,
+    slides: content.slides,
+    videos: content.videos,
+    practice: content.practice,
+    practiceQuestions: workspace.practiceQuestions || course.practiceQuestions || [],
+  }
 
   // Material tabs are shown only when the course actually has content in that
   // section. Overview, Assessment, Feedback and Certificate are always present.
@@ -232,7 +299,12 @@ export default function CourseWorkspace() {
   }
 
   const goToTab = (key) => {
-    if (!isTabLocked(key)) setActiveTab(key)
+    if (isTabLocked(key)) return
+    // A deliberate click on an auto-complete material tab records the intent to
+    // record progress. The ref (not state) means a tab RENDER/refresh never
+    // re-triggers the completion — only an actual user open does.
+    if (AUTO_COMPLETE_TABS.includes(key)) materialOpenedRef.current = true
+    setActiveTab(key)
   }
 
   const handleProceedToAssessment = () => {
@@ -241,30 +313,6 @@ export default function CourseWorkspace() {
     } else {
       setAssessmentNotice(false)
       setActiveTab('assessment')
-    }
-  }
-
-  // Section completion routes through the backend's authoritative ordered gate
-  // (POST /enrollments/:id/progress). The backend only lets a section complete
-  // once every section ordered BEFORE it is done, and the plan is flattened in
-  // GLOBAL order across all material tabs (the lecturer may have uploaded the
-  // tabs interleaved). So instead of bulk-marking every section of the current
-  // tab (which deadlocks on a 409 for the very first click), we advance the
-  // FIRST not-yet-complete section of the global plan — whatever its tab — and
-  // refresh the server state. Repeating it walks the ledger to completion, so
-  // progress always moves forward and the Assessment gate can never stay locked.
-  const completeStep = async (_key) => {
-    if (!enrollmentId) return
-    if (!sectionPlan.length) return
-    setNotice(null)
-    const firstIncomplete = sectionPlan.find((s) => (progressValue ?? 0) < s.milestone)
-    if (!firstIncomplete) return
-    try {
-      await enrollmentApi.markSectionComplete(enrollmentId, firstIncomplete.sectionId)
-      await refreshWorkspace()
-    } catch (err) {
-      await refreshWorkspace()
-      setNotice(err?.message || 'Your progress could not be updated right now.')
     }
   }
 
@@ -277,7 +325,8 @@ export default function CourseWorkspace() {
           <NotesSection
             course={contentCourse}
             done={en?.notesDone}
-            onComplete={() => completeStep('notes')}
+            completing={completing}
+            onComplete={completeStep}
           />
         )
       case 'slides':
@@ -285,7 +334,8 @@ export default function CourseWorkspace() {
           <PPTSection
             course={contentCourse}
             done={en?.slidesDone}
-            onComplete={() => completeStep('slides')}
+            completing={completing}
+            onComplete={completeStep}
           />
         )
       case 'video':
@@ -293,7 +343,8 @@ export default function CourseWorkspace() {
           <VideoSection
             course={contentCourse}
             done={en?.videoDone}
-            onComplete={() => completeStep('video')}
+            completing={completing}
+            onComplete={completeStep}
           />
         )
       case 'practice':
@@ -301,7 +352,7 @@ export default function CourseWorkspace() {
           <PracticeSection
             course={contentCourse}
             done={en?.practiceDone}
-            onComplete={() => completeStep('practice')}
+            onComplete={completeStep}
             onProceedToAssessment={handleProceedToAssessment}
           />
         )
@@ -370,7 +421,19 @@ export default function CourseWorkspace() {
       {notice && (
         <div className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           <AlertCircle size={16} className="shrink-0 text-rose-600" />
-          <p className="flex-1">{notice}</p>
+          <p className="flex-1">{notice.message}</p>
+          {notice.retry && (
+            <button
+              onClick={() => {
+                const retry = notice.retry
+                setNotice(null)
+                retry()
+              }}
+              className="rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
+            >
+              Retry
+            </button>
+          )}
           <button onClick={() => setNotice(null)} className="text-xs font-medium text-rose-600 hover:underline">Dismiss</button>
         </div>
       )}

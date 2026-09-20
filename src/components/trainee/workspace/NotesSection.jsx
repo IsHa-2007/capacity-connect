@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { ArrowRight, BookOpen, CheckCheck, Eye, FileText } from 'lucide-react'
-import { Button, Card, Badge } from '../../common/ui'
+import { BookOpen, CheckCheck, Eye, FileText } from 'lucide-react'
+import { Card, Badge } from '../../common/ui'
 import InAppFileViewer from '../../profile/InAppFileViewer'
 
 // Study Notes section: lists the trainer-uploaded note files for the course.
-// This section is always accessible; it shows a friendly empty state when the
-// trainer has not uploaded any study notes yet.
-export default function NotesSection({ course, done, onComplete }) {
+// Opening the section auto-marks the corresponding material step as read via the
+// backend progress API (idempotent). A ✓ Read badge shows only after the backend
+// confirms; while the confirmation is in flight a subtle "Marking as read…"
+// indicator appears.
+export default function NotesSection({ course, done, completing }) {
   const [viewing, setViewing] = useState(null)
 
   return (
@@ -18,7 +20,11 @@ export default function NotesSection({ course, done, onComplete }) {
           </h3>
           <p className="text-sm text-slate-muted">Reference material prepared by the trainer for {course.title}.</p>
         </div>
-        {done && <Badge tone="green"><CheckCheck size={13} /> Notes reviewed</Badge>}
+        {done ? (
+          <Badge tone="green"><CheckCheck size={13} /> Read</Badge>
+        ) : completing ? (
+          <Badge tone="blue">Marking as read…</Badge>
+        ) : null}
       </div>
 
       {course.notes && course.notes.length ? (
@@ -45,14 +51,6 @@ export default function NotesSection({ course, done, onComplete }) {
         <div className="mt-5 rounded-xl border border-dashed border-border-soft bg-sky-soft p-6 text-center">
           <p className="text-sm text-slate-muted">No study notes available yet.</p>
           <p className="mt-1 text-xs text-slate-muted">The trainer has not uploaded study notes for this course. Check back later.</p>
-        </div>
-      )}
-
-      {course.notes && course.notes.length > 0 && !done && onComplete && (
-        <div className="mt-5 flex justify-end border-t border-border-subtle pt-4">
-          <Button onClick={onComplete}>
-            Mark Notes as Reviewed <ArrowRight size={16} />
-          </Button>
         </div>
       )}
 
