@@ -183,7 +183,7 @@ export async function listSections(actor, courseId) {
 export async function addSection(actor, courseId, input) {
   const course = await repo.findCourseById(courseId)
   requireOwner(actor, course)
-  return repo.createSectionRow({ ...input, course_id: courseId })
+  return repo.createSectionRow({ ...input, courseId })
 }
 
 const SECTION_TYPE_FOLDER = {
@@ -313,7 +313,7 @@ export async function addQuestion(actor, courseId, input) {
   // questionIsStructurallyValid). The DB default is FALSE; the repo honors an
   // explicit isValid when provided.
   const isValid = questionIsStructurallyValid(input)
-  return repo.createQuestionRow({ ...input, course_id: courseId, isValid })
+  return repo.createQuestionRow({ ...input, courseId, isValid })
 }
 
 export async function updateQuestion(actor, courseId, questionId, patch) {

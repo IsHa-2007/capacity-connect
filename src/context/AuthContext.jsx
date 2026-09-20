@@ -11,7 +11,7 @@ import { users as seedUsers } from '../data/mockData'
 import * as authApi from '../services/authService'
 import * as userApi from '../services/userApi'
 import { cloudPhotoUrl } from '../services/userApi'
-import { getAccessToken, setAccessToken, isApiHttpError } from '../services/api'
+import { getAccessToken, setAccessToken, clearAccessToken, isApiHttpError } from '../services/api'
 import * as userService from '../services/userService'
 // M18.3 — auth transitions invalidate the bounded read-only runtime API cache so
 // user-scoped responses (profile, notifications, broadcasts, enrollments) can

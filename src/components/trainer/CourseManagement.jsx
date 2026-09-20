@@ -307,7 +307,7 @@ function SectionManager({ course, section, icon: Icon, title, empty }) {
     const msg = forFolderError(section, file)
     if (msg) {
       setErr(msg)
-      fileRef.current.value = ''
+      if (fileRef.current) fileRef.current.value = ''
       return
     }
     setUploading(true)
@@ -327,7 +327,7 @@ function SectionManager({ course, section, icon: Icon, title, empty }) {
       setErr(e?.message || 'Could not upload the file.')
     } finally {
       setUploading(false)
-      fileRef.current.value = ''
+      if (fileRef.current) fileRef.current.value = ''
     }
   }
 

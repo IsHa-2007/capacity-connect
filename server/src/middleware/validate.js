@@ -38,6 +38,25 @@ export function parseOrThrow(schema, value, source = 'body') {
   return result.data
 }
 
+// Express 5 exposes `req.query` through a getter-only accessor (no setter), so
+// a strict-mode assignment like `req.query = parsed` throws
+// `TypeError: Cannot set property query of ... which has only a getter`.
+// Redefine the property on the request instance with an own DATA property so the
+// validated value is visible to controllers exactly as before. `req.body` and
+// `req.params` keep their plain-assignment path.
+function assignRequestValue(req, key, value) {
+  try {
+    req[key] = value
+  } catch {
+    Object.defineProperty(req, key, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value,
+    })
+  }
+}
+
 export function validate(schema, source = 'body') {
   return (req, _res, next) => {
     const result = schema.safeParse(req[source])
@@ -52,7 +71,7 @@ export function validate(schema, source = 'body') {
       }
       return next(new ApiError(400, 'VALIDATION_ERROR', 'Invalid request data.', details))
     }
-    req[source] = result.data
+    assignRequestValue(req, source, result.data)
     return next()
   }
 }
