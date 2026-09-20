@@ -121,6 +121,7 @@ function CreateCourseModal({ open, onClose, onCreate, createCourse }) {
     audience: '',
     difficulty: 'Beginner',
     duration: '4 weeks',
+    assessmentDurationMinutes: 20,
     tags: '',
     prerequisites: '',
     objectives: '',
@@ -143,6 +144,7 @@ function CreateCourseModal({ open, onClose, onCreate, createCourse }) {
         audience: form.audience.trim(),
         difficulty: form.difficulty,
         duration: form.duration,
+        assessmentDurationMinutes: Number(form.assessmentDurationMinutes) || 20,
         tags: form.tags.split(',').map((s) => s.trim()).filter(Boolean),
         // New courses always start as DRAFT; publishing runs through the validated
         // publish flow which requires only the minimum course identity
@@ -206,7 +208,18 @@ function CreateCourseModal({ open, onClose, onCreate, createCourse }) {
               </select>
             </Field>
           </div>
-          <div className="mt-4">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Assessment Duration (minutes)">
+              <input
+                type="number"
+                min={5}
+                max={180}
+                value={form.assessmentDurationMinutes}
+                onChange={set('assessmentDurationMinutes')}
+                className="inp"
+                placeholder="20"
+              />
+            </Field>
             <Field label="Tags (comma-separated)">
               <input value={form.tags} onChange={set('tags')} placeholder="e.g. NWP, DWR, forecasting" className="inp" />
             </Field>

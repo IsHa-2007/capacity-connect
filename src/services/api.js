@@ -13,6 +13,8 @@
 // in API_PREFIX below; a configured base that already ends in '/api' is
 // normalised down to the origin so a double '/api/api' can never be produced.
 
+import { reportTransportFailure, reportTransportReachable } from '../offline/connectivity'
+
 export const API_PREFIX = '/api'
 
 // Normalises VITE_API_BASE_URL to a bare origin: strips trailing slashes and a
@@ -82,8 +84,14 @@ async function request(path, { method = 'GET', body, token } = {}) {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch (err) {
+    // Genuine transport failure (DNS/offline/CORS/aborted) — the server was not
+    // reached. This NEVER affects the stored token or triggers the DEV mock.
+    reportTransportFailure()
     throw new Error(`Unable to reach the API at ${API_BASE_URL}${API_PREFIX}. Is the backend running?`, { cause: err })
   }
+
+  // Any HTTP response, including 4xx/5xx, proves the server was reachable.
+  reportTransportReachable()
 
   let json = null
   try {

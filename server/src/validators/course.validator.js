@@ -29,6 +29,22 @@ const difficulty = z.enum(COURSE_DIFFICULTIES, {
 })
 
 // ---------------------------------------------------------------------------
+// MODULE 19 — ASSESSMENT DURATION
+// ---------------------------------------------------------------------------
+// Trainer-configured assessment time limit in whole minutes. Bounded server-side
+// to [MIN, MAX]; the same bounds are enforced by assessment.service (the
+// assessment rules authority) and by the additive migration's DB CHECK
+// (courses.assessment_duration_minutes BETWEEN 5 AND 180), so every layer agrees.
+export const ASSESSMENT_DURATION_MIN_MINUTES = 5
+export const ASSESSMENT_DURATION_MAX_MINUTES = 180
+
+const assessmentDurationMinutes = z
+  .number()
+  .int('Assessment duration must be a whole number of minutes.')
+  .min(ASSESSMENT_DURATION_MIN_MINUTES, `Assessment duration must be at least ${ASSESSMENT_DURATION_MIN_MINUTES} minutes.`)
+  .max(ASSESSMENT_DURATION_MAX_MINUTES, `Assessment duration cannot exceed ${ASSESSMENT_DURATION_MAX_MINUTES} minutes.`)
+
+// ---------------------------------------------------------------------------
 // COURSE CREATE / UPDATE
 // ---------------------------------------------------------------------------
 
@@ -43,6 +59,7 @@ export const createCourseSchema = z.object({
   tags: stringArray('Tags', 50, 80).optional().default([]),
   status: z.enum(COURSE_STATUSES).optional().default('DRAFT'),
   isFeatured: z.boolean().optional().default(false),
+  assessmentDurationMinutes: assessmentDurationMinutes.optional(),
 })
 
 // Publish requires a trainerId ONLY on create; the service still validates that
@@ -58,6 +75,7 @@ export const updateCourseSchema = z.object({
   tags: stringArray('Tags', 50, 80).optional(),
   status: z.enum(COURSE_STATUSES).optional(),
   isFeatured: z.boolean().optional(),
+  assessmentDurationMinutes: assessmentDurationMinutes.optional(),
 }).refine((v) => Object.keys(v).length > 0, { message: 'At least one field must be provided.' })
 
 export const listCoursesQuerySchema = z.object({

@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { CourseProvider } from './context/CourseContext'
 import { TrainerProvider } from './context/TrainerContext'
 import { BroadcastProvider } from './context/BroadcastContext'
+import { ConnectivityProvider } from './offline/ConnectivityProvider'
+import { OfflineStatus } from './offline/OfflineStatus'
 import LandingDashboard from './pages/LandingDashboard'
 import AuthPage from './pages/AuthPage'
 import PendingApprovalPage from './pages/PendingApprovalPage'
@@ -57,25 +59,28 @@ function Unauthorized() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <CourseProvider>
-        <TrainerProvider>
-          <BroadcastProvider>
-            <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<LandingDashboard />} />
-              <Route path="/auth" element={<AuthPage />} />
-              <Route path="/home" element={<RoleHome />} />
-              <Route path="/unauthorized" element={<Unauthorized />} />
-              <Route path="/trainee/*" element={<TraineeApp />} />
-              <Route path="/trainer/*" element={<TrainerDashboard />} />
-              <Route path="/admin/*" element={<AdminDashboard />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </BrowserRouter>
-          </BroadcastProvider>
-        </TrainerProvider>
-      </CourseProvider>
-    </AuthProvider>
+    <ConnectivityProvider>
+      <AuthProvider>
+        <CourseProvider>
+          <TrainerProvider>
+            <BroadcastProvider>
+              <BrowserRouter>
+                <OfflineStatus />
+                <Routes>
+                  <Route path="/" element={<LandingDashboard />} />
+                  <Route path="/auth" element={<AuthPage />} />
+                  <Route path="/home" element={<RoleHome />} />
+                  <Route path="/unauthorized" element={<Unauthorized />} />
+                  <Route path="/trainee/*" element={<TraineeApp />} />
+                  <Route path="/trainer/*" element={<TrainerDashboard />} />
+                  <Route path="/admin/*" element={<AdminDashboard />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </BrowserRouter>
+            </BroadcastProvider>
+          </TrainerProvider>
+        </CourseProvider>
+      </AuthProvider>
+    </ConnectivityProvider>
   )
 }

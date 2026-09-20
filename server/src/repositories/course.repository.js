@@ -9,6 +9,7 @@
 //   courses:                  id, trainer_id, title, domain, description,
 //                             difficulty, duration, objectives[], syllabus[],
 //                             tags[], status, is_featured, search_vector,
+//                             assessment_duration_minutes (Module 19, additive),
 //                             created_at, updated_at, published_at
 //   course_sections:          id, course_id, section_type, order_index, title,
 //                             storage_bucket, storage_path, mime_type,
@@ -23,7 +24,8 @@ import { ApiError } from '../utils/apiResponse.js'
 
 const COURSES_BASE = `
   id, trainer_id, title, domain, description, difficulty, duration,
-  objectives, syllabus, tags, status, is_featured, created_at, updated_at, published_at
+  objectives, syllabus, tags, status, is_featured,
+  assessment_duration_minutes, created_at, updated_at, published_at
 `
 
 function mapCourseRow(row) {
@@ -41,6 +43,7 @@ function mapCourseRow(row) {
     tags: Array.isArray(row.tags) ? row.tags : [],
     status: row.status,
     isFeatured: row.is_featured,
+    assessmentDurationMinutes: row.assessment_duration_minutes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     publishedAt: row.published_at,
@@ -125,6 +128,8 @@ export async function createCourseRow(input) {
       tags: Array.isArray(input.tags) ? input.tags : [],
       status: input.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT',
       is_featured: !!input.isFeatured,
+      // Module 19: the DB column defaults to 20 when not supplied on create.
+      assessment_duration_minutes: input.assessmentDurationMinutes,
       published_at: input.status === 'PUBLISHED' ? new Date().toISOString() : null,
     })
     .select(COURSES_BASE)
@@ -162,6 +167,7 @@ function writePatch(patch) {
     else out.published_at = null
   }
   if (patch.isFeatured !== undefined) out.is_featured = !!patch.isFeatured
+  if (patch.assessmentDurationMinutes !== undefined) out.assessment_duration_minutes = patch.assessmentDurationMinutes
   out.updated_at = new Date().toISOString()
   return out
 }

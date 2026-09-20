@@ -160,6 +160,7 @@ function DetailsSection({ course, openEdit, onPublish, onUnpublish }) {
             <DetailRow label="Audience" value={course.audience || '—'} />
             <DetailRow label="Difficulty" value={course.difficulty} />
             <DetailRow label="Estimated Duration" value={course.duration} />
+            <DetailRow label="Assessment Time" value={`${course.assessmentDurationMinutes ?? 20} minutes`} />
             <DetailRow label="Status" value={isPublished ? 'Published' : 'Draft'} />
             <DetailRow label="Trainer" value={course.trainer} />
             <DetailRow label="Created" value={course.createdAt ? new Date(course.createdAt).toLocaleDateString() : '—'} />
@@ -227,6 +228,7 @@ function EditCourseModal({ course, open, onClose, onSave }) {
     audience: course.audience || '',
     difficulty: course.difficulty,
     duration: course.duration,
+    assessmentDurationMinutes: course.assessmentDurationMinutes ?? 20,
     prerequisites: (course.prerequisites || []).join('\n'),
   })
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
@@ -261,6 +263,18 @@ function EditCourseModal({ course, open, onClose, onSave }) {
             </select>
           </Field>
         </div>
+        <Field label="Assessment Duration (minutes)">
+          <input
+            type="number"
+            min={5}
+            max={180}
+            value={form.assessmentDurationMinutes}
+            onChange={set('assessmentDurationMinutes')}
+            className="inp"
+            placeholder="20"
+          />
+          <p className="mt-1 text-xs text-slate-muted">Timer shown to trainees for the final assessment (5–180 minutes).</p>
+        </Field>
         <Field label="Prerequisites (one per line)">
           <textarea value={form.prerequisites} onChange={set('prerequisites')} rows={2} className="inp resize-none" />
         </Field>

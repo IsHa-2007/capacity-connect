@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
   useCallback,
+  useRef,
 } from 'react'
 import { users as seedUsers } from '../data/mockData'
 import * as authApi from '../services/authService'
@@ -12,6 +13,10 @@ import * as userApi from '../services/userApi'
 import { cloudPhotoUrl } from '../services/userApi'
 import { getAccessToken, setAccessToken, isApiHttpError } from '../services/api'
 import * as userService from '../services/userService'
+// M18.3 — auth transitions invalidate the bounded read-only runtime API cache so
+// user-scoped responses (profile, notifications, broadcasts, enrollments) can
+// never leak across identities. Never called for non-auth reasons.
+import { purgeApiCache } from '../offline/apiCache'
 
 const AuthContext = createContext(null)
 
@@ -112,6 +117,15 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [users, setUsers] = useState([])
   const [version, setVersion] = useState(0)
+
+  // M18.3 — cross-user hygiene seam. Every uid transition (login, restore,
+  // logout, session clear, admin rejection) invalidates the bounded read-only
+  // runtime API cache, so user-scoped responses (/api/users/me, notifications,
+  // enrollments, …) can never leak from one account into another. Single seam,
+  // by design — see purgeApiCache + READ_ONLY_GET_PATTERNS in src/offline/apiCache.js.
+  useEffect(() => {
+    purgeApiCache()
+  }, [currentUser?.uid])
 
   const isAdmin = currentUser?.role === 'ADMIN' && currentUser?.status === 'approved'
 

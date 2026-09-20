@@ -19,6 +19,17 @@
 // Constants are exported so tests can exercise the pure helpers (distribution,
 // eligibility, scoring) without touching a database.
 
+// MODULE 19 (PHASE 1) — TRAINER-CONFIGURABLE ASSESSMENT DURATION
+// The assessment time limit is NO LONGER a single hardcoded constant. It is a
+// per-course persisted value (courses.assessment_duration_minutes) configured by
+// the authorized trainer/course owner and owned here:
+//   * The backend is authoritative for the duration — startAssessment resolves
+//     the SAME course value every attempt, never a client-supplied number.
+//   * Existing/legacy courses default to the product default (20 minutes), both
+//     by the additive migration's DEFAULT 20 and by the runtime fallback below.
+//   * Bounds (5..180 minutes) are enforced by the zod validator, the DB CHECK,
+//     and the exported constants so every layer agrees.
+
 import { ApiError } from '../utils/apiResponse.js'
 import * as assessmentRepo from '../repositories/assessment.repository.js'
 import * as enrollmentRepo from '../repositories/enrollment.repository.js'
@@ -30,10 +41,26 @@ import { finalizeCompletion as finalizeEnrollmentCompletion } from './enrollment
 // time limit, negative marking and pass threshold are reused verbatim, not
 // reinvented. 20 questions → 20% easy (4) / 30% medium (6) / 50% hard (10).
 export const ASSESSMENT_QUESTION_COUNT = 20
-export const ASSESSMENT_TIME_LIMIT_SECONDS = 20 * 60 // 20 minutes (product default)
+// MODULE 19: the product default duration remains a documented constant; the
+// runtime limit is the owning course's per-course value (see
+// resolveAssessmentTimeLimitSeconds below).
+export const DEFAULT_ASSESSMENT_DURATION_MINUTES = 20
+export const ASSESSMENT_DURATION_MIN_MINUTES = 5
+export const ASSESSMENT_DURATION_MAX_MINUTES = 180
+export const ASSESSMENT_TIME_LIMIT_SECONDS = DEFAULT_ASSESSMENT_DURATION_MINUTES * 60 // 20 minutes (product default)
 export const NEGATIVE_MARKING = 0.25
 export const ASSESSMENT_PASS_PERCENTAGE = 75
 export const DIFFICULTIES = ['EASY', 'MEDIUM', 'HARD']
+
+// Resolves the assessment time limit for a course attempt. The backend is
+// authoritative: this returns the course's persisted duration in minutes
+// (courses.assessment_duration_minutes), falling back to the 20-minute product
+// default only when the row predates the Module 19 migration / has a NULL value.
+// minutes is bounded (5..180) at every layer; * 60 is the documented conversion.
+export function resolveAssessmentTimeLimitSeconds(course) {
+  const minutes = course?.assessmentDurationMinutes ?? DEFAULT_ASSESSMENT_DURATION_MINUTES
+  return minutes * 60
+}
 
 // Deterministic 20/30/50 split for a target size. Rounding matches the existing
 // generator (round() on easy/medium, remainder to hard) so the counts always
@@ -203,7 +230,7 @@ export async function startAssessment(actor, enrollmentId) {
     enrollmentId: attempt.enrollmentId,
     courseId: attempt.courseId,
     distribution,
-    timeLimitSeconds: ASSESSMENT_TIME_LIMIT_SECONDS,
+    timeLimitSeconds: resolveAssessmentTimeLimitSeconds(course),
     questions: snapshotQuestions.map(({ id, text, options, difficulty, topic, tagLabel, questionType }) => ({
       id,
       text,

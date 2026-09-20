@@ -8,14 +8,20 @@ import {
   Flag,
   RotateCcw,
   Timer,
+  WifiOff,
   XCircle,
 } from 'lucide-react'
 import { Card, Badge, Button } from '../../common/ui'
 import { startAssessment, submitAssessment } from '../../../services/assessmentApi.js'
+import { useConnectivity } from '../../../offline/useConnectivity'
+import { OFFLINE_WRITE_MESSAGE } from '../../../offline/connectivity'
 
 const ASSESSMENT_TIME_SECONDS = 20 * 60 // 20 minutes
 
 export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
+  // MODULE 19 (PHASE 2): the single M18 connectivity signal (browser offline OR
+  // transport failure) drives pause/resume. No second connectivity system.
+  const { isProblem } = useConnectivity()
   const [phase, setPhase] = useState('intro') // intro | running | result
   const [assessment, setAssessment] = useState(null)
   const [attemptId, setAttemptId] = useState(null)
@@ -25,11 +31,13 @@ export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
   const [confirmSubmit, setConfirmSubmit] = useState(false)
   const [timeLeft, setTimeLeft] = useState(ASSESSMENT_TIME_SECONDS)
   const [startError, setStartError] = useState('')
+  const [paused, setPaused] = useState(false)
   const timerRef = useRef(null)
 
   // The lock gate is managed by the parent workspace.
   const start = async () => {
     setStartError('')
+    setPaused(false)
     try {
       const attempt = await startAssessment(enrollmentId)
       setAttemptId(attempt.attemptId)
@@ -46,13 +54,25 @@ export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
     }
   }
 
+  // MODULE 19 (PHASE 2) — pause/resume. While a running assessment has a
+  // connectivity problem it is PAUSED: the countdown stops, the state (question
+  // index, answers, question order, attempt id, duration, remaining time) stays
+  // untouched, and nothing is submitted or re-created. When the problem clears
+  // the same attempt resumes automatically from the preserved remaining time.
   useEffect(() => {
     if (phase !== 'running') return
+    setPaused(isProblem)
+  }, [phase, isProblem])
+
+  // The countdown only runs while the assessment is running AND not paused, so
+  // a connectivity loss freezes the remaining time exactly where it was.
+  useEffect(() => {
+    if (phase !== 'running' || paused) return
     timerRef.current = setInterval(() => {
       setTimeLeft((t) => (t <= 1 ? 0 : t - 1))
     }, 1000)
     return () => clearInterval(timerRef.current)
-  }, [phase])
+  }, [phase, paused])
 
   const setAnswer = (index, option) => {
     setAnswers((a) => {
@@ -65,9 +85,16 @@ export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
   const submit = async () => {
     clearInterval(timerRef.current)
     if (!assessment || !attemptId) return
+    // MODULE 19 (PHASE 2) — final submission REQUIRES connectivity. Offline we
+    // never queue, fake or retry: the attempt is kept pending and the trainee is
+    // told why. The backend remains the only authority for scoring/submission.
+    if (isProblem) {
+      setStartError(OFFLINE_WRITE_MESSAGE)
+      return
+    }
     const answersPayload = assessment.questions
       .map((q, i) => ({ questionId: q.id, optionIndex: answers[i] }))
-    const elapsed = ASSESSMENT_TIME_SECONDS - Math.max(0, timeLeft)
+    const elapsed = (assessment.timeLimitSeconds ?? ASSESSMENT_TIME_SECONDS) - Math.max(0, timeLeft)
     try {
       const res = await submitAssessment(enrollmentId, attemptId, {
         answers: answersPayload,
@@ -120,6 +147,14 @@ export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
   }
 
   if (!assessment) return null
+
+  // MODULE 19 (PHASE 2) — a running assessment with a connectivity problem shows
+  // the paused screen instead of the quiz. The state below (question index,
+  // answers, order, attempt id, duration, remaining time) is untouched in memory,
+  // so auto-resume lands the trainee back on the exact same question + timer.
+  if (phase === 'running' && paused) {
+    return <PausedCard timeLeft={timeLeft} formatTime={mmss} />
+  }
 
   const q = assessment.questions[current]
   const answered = answers.filter((a) => a !== null).length
@@ -371,6 +406,51 @@ function ScoreBox({ label, value, tone }) {
     <div className="rounded-xl border border-border-subtle bg-sky-soft p-3">
       <p className={`text-2xl font-semibold ${tone}`}>{value}</p>
       <p className="text-xs text-slate-muted">{label}</p>
+    </div>
+  )
+}
+
+// MODULE 19 (PHASE 2) — the clear "connection lost / assessment paused" UI shown
+// while a running assessment waits for connectivity. It renders no controls that
+// could submit, restart the timer, or start a second attempt: recovery is a
+// pure state transition back to 'running' when the M18 signal clears.
+function PausedCard({ timeLeft, formatTime }) {
+  return (
+    <Card className="p-8">
+      <div className="mx-auto max-w-xl text-center">
+        <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-amber-50 text-amber-600">
+          <WifiOff size={26} />
+        </span>
+        <h3 className="mt-4 text-xl font-semibold text-primary-deep">Connection Lost — Assessment Paused</h3>
+        <p className="mt-2 text-sm text-slate-body">
+          Your internet connection was interrupted. The timer is paused and your answers and progress are preserved.
+          Nothing has been submitted. You will resume this exact assessment where you left off once the connection is restored.
+        </p>
+
+        <div className="mx-auto mt-5 grid max-w-xs grid-cols-2 gap-3">
+          <StatusBox label="Time remaining (preserved)" value={formatTime(timeLeft)} />
+          <StatusBox label="Submission status" value="Requires connection" />
+        </div>
+
+        <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <p className="flex items-center justify-center gap-2">
+            <AlertTriangle size={15} /> Submitting requires an internet connection. The attempt stays pending until you reconnect.
+          </p>
+        </div>
+
+        <p className="mt-5 text-sm text-slate-muted">
+          You'll be returned to the same question automatically when the connection resumes.
+        </p>
+      </div>
+    </Card>
+  )
+}
+
+function StatusBox({ label, value }) {
+  return (
+    <div className="rounded-xl border border-border-subtle bg-sky-soft p-3">
+      <p className="text-sm font-semibold text-primary-deep">{(value)}</p>
+      <p className="mt-0.5 text-xs text-slate-muted">{label}</p>
     </div>
   )
 }

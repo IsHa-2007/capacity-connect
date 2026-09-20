@@ -68,6 +68,7 @@ export function mapCourseFromApi(c) {
     rating: 0,
     status: statusFromApi(c.status, c.isFeatured),
     isFeatured: Boolean(c.isFeatured),
+    assessmentDurationMinutes: c.assessmentDurationMinutes ?? 20,
     publishedAt: c.publishedAt || null,
     createdAt: c.createdAt || null,
     updatedAt: c.updatedAt || null,
@@ -167,6 +168,10 @@ export function createCoursePayload(data) {
     tags: data.tags,
     status: data.status === 'published' || data.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT',
     isFeatured: data.isFeatured,
+    assessmentDurationMinutes:
+      data.assessmentDurationMinutes === undefined || data.assessmentDurationMinutes === null
+        ? 20
+        : Number(data.assessmentDurationMinutes),
   }
 }
 
@@ -184,6 +189,7 @@ export function updateCoursePayload(patch) {
     out.status = patch.status === 'published' || patch.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT'
   }
   if (patch.isFeatured !== undefined) out.isFeatured = Boolean(patch.isFeatured)
+  if (patch.assessmentDurationMinutes !== undefined) out.assessmentDurationMinutes = Number(patch.assessmentDurationMinutes)
   return out
 }
 

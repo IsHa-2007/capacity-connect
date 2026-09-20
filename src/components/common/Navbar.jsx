@@ -17,6 +17,7 @@ import { useBroadcasts } from '../../context/BroadcastContext'
 import { useCourses } from '../../context/CourseContext'
 import { getSearchableUsers } from '../../services/userService'
 import * as notificationApi from '../../services/notificationApi'
+import { useOfflineWriteGuard } from '../../offline/useConnectivity'
 import { Avatar } from './ui'
 
 const roleLabel = {
@@ -30,6 +31,7 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
   const { broadcasts } = useBroadcasts()
   const { courseCatalog, getEnrollment } = useCourses()
   const navigate = useNavigate()
+  const guardWrite = useOfflineWriteGuard()
   const [notifOpen, setNotifOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -80,6 +82,7 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
 
   const markAllRead = async () => {
     if (!backendActive) return
+    if (!guardWrite()) return
     try {
       await notificationApi.markAllNotificationsRead()
       setBackendNotifs((list) => list.map((n) => ({ ...n, isRead: true })))
@@ -92,6 +95,7 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
 
   const readNotification = async (n) => {
     if (!backendActive || n.isRead) return
+    if (!guardWrite()) return
     try {
       await notificationApi.markNotificationRead(n.id)
       setBackendNotifs((list) => list.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)))
