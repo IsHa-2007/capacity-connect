@@ -90,8 +90,10 @@ export default function LandingDashboard() {
             <div className="hidden lg:block">
               <div className="rounded-2xl border border-border-soft bg-white p-6 shadow-[0_8px_30px_rgba(31,95,147,0.08)]">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-primary-deep">Workforce Readiness</p>
-                  <BadgeGreen>Live</BadgeGreen>
+                  <p className="text-sm font-semibold text-primary-deep">Workforce Readiness Targets</p>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                    <span className="h-1.5 w-1.5 rounded-full bg-slate-400" /> Targets
+                  </span>
                 </div>
                 <div className="mt-5 space-y-4">
                   <MetricRow label="Verified Personnel" value="2,400+" icon={<Users size={16} />} />
@@ -100,6 +102,9 @@ export default function LandingDashboard() {
                   <MetricRow label="Regional Stations" value="36" icon={<Globe2 size={16} />} />
                   <MetricRow label="Certifications Issued" value="1,860" icon={<Award size={16} />} />
                 </div>
+                <p className="mt-4 text-xs text-slate-muted">
+                  Illustrative programme targets — live platform figures appear as regional onboarding completes.
+                </p>
               </div>
             </div>
           </div>
@@ -219,14 +224,6 @@ export default function LandingDashboard() {
         </div>
       </footer>
     </div>
-  )
-}
-
-function BadgeGreen({ children }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-600">
-      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> {children}
-    </span>
   )
 }
 

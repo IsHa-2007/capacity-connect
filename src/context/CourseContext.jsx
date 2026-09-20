@@ -105,25 +105,29 @@ export function CourseProvider({ children }) {
   // Declared before the effect that depends on it: the effect's dependency array
   // is evaluated during render, so syncEnrollments must be initialized first.
   const syncEnrollments = useCallback(async () => {
+    if (!currentUser) return
     const rows = await enrollmentApi.listEnrollments()
     const list = Array.isArray(rows) ? rows : []
-    let enriched = list.map(courseApi.mapEnrollmentFromApi)
-    if (currentUser?.role === 'TRAINER') {
-      const [fullRows, certRows] = await Promise.all([
-        Promise.all(list.slice(0, 100).map((r) => enrollmentApi.getEnrollment(r.id).catch(() => null))),
-        certificateApi.listCertificates().catch(() => []),
-      ])
-      enriched = fullRows.filter(Boolean).map(courseApi.mapEnrollmentFromApi)
-      const certList = Array.isArray(certRows) ? certRows : []
-      const byEnrollment = new Map(certList.map((ct) => [String(ct.enrollmentId), ct]))
-      enriched.forEach((e) => {
-        const ct = byEnrollment.get(String(e.id))
-        if (ct) {
-          e.certificate = { id: ct.id, issuedOn: ct.issuedOn || null, certificateNumber: ct.certificateNumber || null }
-          if (ct.traineeName) e.traineeName = ct.traineeName
-        }
-      })
-    }
+    // Every viewer (owner trainee / owning trainer / admin) is entitled to the
+    // same authoritative FULL row (assessment summary, feedback, progress) and
+    // role-scoped issued certificates. Base listEnrollments rows lack the
+    // assessment/feedback block, so per-row getEnrollment enrichment applies to
+    // ALL roles — otherwise the trainee progress/profile views would show 0
+    // attempts and no certificate even after passing.
+    const [fullRows, certRows] = await Promise.all([
+      Promise.all(list.slice(0, 100).map((r) => enrollmentApi.getEnrollment(r.id).catch(() => null))),
+      certificateApi.listCertificates().catch(() => []),
+    ])
+    const enriched = fullRows.filter(Boolean).map(courseApi.mapEnrollmentFromApi)
+    const certList = Array.isArray(certRows) ? certRows : []
+    const byEnrollment = new Map(certList.map((ct) => [String(ct.enrollmentId), ct]))
+    enriched.forEach((e) => {
+      const ct = byEnrollment.get(String(e.id))
+      if (ct) {
+        e.certificate = { id: ct.id, issuedOn: ct.issuedOn || null, certificateNumber: ct.certificateNumber || null }
+        if (ct.traineeName) e.traineeName = ct.traineeName
+      }
+    })
     setEnrollments((prev) => (prev === enriched ? prev : enriched))
   }, [currentUser])
 
@@ -624,7 +628,12 @@ export function CourseProvider({ children }) {
   const uploadCourseFile = async (courseId, folder, file) => {
     if (backendActive) {
       const course = courseById(courseId)
-      await courseApi.uploadSection(
+      // The backend returns the CREATED section row (server-generated
+      // storagePath). Returning it matters: SectionManager/VideoManager pass
+      // `ref.storagePath` to addContent, and escalateManuallyAddedContent's
+      // storagePath dedup then finds the just-persisted section instead of
+      // creating a second bare section row.
+      const created = await courseApi.uploadSection(
         courseId,
         {
           sectionType: sectionApiType(folder),
@@ -634,7 +643,7 @@ export function CourseProvider({ children }) {
         file,
       )
       await refreshCourseSections(courseId)
-      return true
+      return created ? courseApi.mapSectionFromApi(created) : true
     }
     return courseService.uploadCourseFile(currentUser, courseId, folder, file)
   }

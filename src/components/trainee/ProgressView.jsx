@@ -38,6 +38,14 @@ export default function ProgressView() {
     [enrollments],
   )
 
+  // Honest, computed recommendation: the in-progress course with the lowest
+  // completion percentage is what actually needs focus. No hardcoded course.
+  const recommendation = useMemo(() => {
+    const active = enrollments.filter((e) => e.enrollment.status !== 'completed')
+    if (!active.length) return null
+    return active.reduce((min, e) => (e.enrollment.progress < min.enrollment.progress ? e : min), active[0])
+  }, [enrollments])
+
   return (
     <div className="space-y-6">
       <div>
@@ -102,7 +110,11 @@ export default function ProgressView() {
           </div>
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
             <p className="flex items-center gap-1.5 font-medium"><Star size={13} /> Recommended</p>
-            <p className="mt-1">Focus on completing Weather Forecasting Fundamentals to reach Proficient level.</p>
+            <p className="mt-1">
+              {recommendation
+                ? `Focus on completing ${recommendation.course.title} to keep progressing toward the Proficient level.`
+                : 'You have completed every enrolled course. Enroll in a new course to keep building your competency record.'}
+            </p>
           </div>
         </Card>
       </div>
@@ -131,7 +143,7 @@ export default function ProgressView() {
                   </div>
                   <div className="rounded-xl border border-border-subtle bg-sky-soft p-3 text-center">
                     <p className="text-xs text-slate-muted">Attempts</p>
-                    <p className="font-semibold text-primary-deep">{enrollment.assessment ? 1 : 0}</p>
+                    <p className="font-semibold text-primary-deep">{enrollment.attempts}</p>
                   </div>
                 </div>
               </Card>

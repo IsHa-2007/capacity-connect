@@ -221,6 +221,14 @@ function stageLabel(en) {
 }
 
 function DeckSection() {
+  const { currentUser } = useAuth()
+  const { myCertificates, courseById } = useCourses()
+  // The deadlines list is static demo content from the mock store — there is no
+  // real scheduling backend — so it only renders in the dev-mock experience.
+  const isBackend = Boolean(currentUser && currentUser.authSource === 'supabase')
+  const recent = [...myCertificates]
+    .sort((a, b) => String(b.certificate?.issuedOn || '').localeCompare(String(a.certificate?.issuedOn || '')))[0]
+
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       <Card className="p-6">
@@ -228,38 +236,54 @@ function DeckSection() {
           <h3 className="flex items-center gap-2 font-semibold text-primary-deep">
             <Calendar size={18} className="text-primary" /> Upcoming Deadlines
           </h3>
-          <button className="text-sm font-medium text-primary hover:underline">View Calendar →</button>
         </div>
-        <div className="mt-4 space-y-3">
-          {deadlines.map((d) => (
-            <div key={d.label} className="flex items-center gap-4 rounded-xl border border-border-subtle bg-sky-soft p-3">
-              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-primary to-secondary text-white">
-                <div className="text-center">
-                  <p className="text-base font-bold leading-none">{d.day}</p>
-                  <p className="text-[10px] font-medium">{d.month}</p>
+        {!isBackend && deadlines.length ? (
+          <div className="mt-4 space-y-3">
+            {deadlines.map((d) => (
+              <div key={d.label} className="flex items-center gap-4 rounded-xl border border-border-subtle bg-sky-soft p-3">
+                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-primary to-secondary text-white">
+                  <div className="text-center">
+                    <p className="text-base font-bold leading-none">{d.day}</p>
+                    <p className="text-[10px] font-medium">{d.month}</p>
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-primary-deep">{d.label}</p>
+                  <p className="text-xs text-slate-muted">{d.when}</p>
                 </div>
               </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-primary-deep">{d.label}</p>
-                <p className="text-xs text-slate-muted">{d.when}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-4">
+            <EmptyState
+              icon={Calendar}
+              title="No scheduled deadlines"
+              description="Scheduled training deadlines will appear here for your station."
+            />
+          </div>
+        )}
       </Card>
 
       <Card className="p-6">
         <h3 className="flex items-center gap-2 font-semibold text-primary-deep">
           <Award size={18} className="text-primary" /> Recent Achievements
         </h3>
-        <div className="mt-4 rounded-xl border border-border-subtle bg-sky-soft p-4">
-          <p className="text-sm font-medium text-primary-deep">Verified Certificate Earned</p>
-          <p className="text-xs text-slate-muted">Satellite Meteorology Applications · CC-2026-0004821</p>
-          <div className="mt-2 flex items-center gap-2">
-            <Badge tone="green"><Award size={12} /> Competency Verified</Badge>
-            <Badge tone="navy">Level: Proficient</Badge>
+        {recent ? (
+          <div className="mt-4 rounded-xl border border-border-subtle bg-sky-soft p-4">
+            <p className="text-sm font-medium text-primary-deep">Verified Certificate Earned</p>
+            <p className="text-xs text-slate-muted">
+              {courseById(recent.courseId)?.title || 'Course'} · {recent.certificate.certificateNumber}
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <Badge tone="green"><Award size={12} /> Competency Verified</Badge>
+            </div>
           </div>
-        </div>
+        ) : (
+          <p className="mt-4 text-sm text-slate-muted">
+            No certificates earned yet. Complete a course to unlock your verified certificate here.
+          </p>
+        )}
       </Card>
     </div>
   )

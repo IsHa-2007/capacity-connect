@@ -106,8 +106,10 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
     }
   }
 
-  const profilePath =
-    role === 'ADMIN' ? '/admin/profile' : role === 'TRAINER' ? '/trainer/profile' : '/trainee/profile'
+  // Admins have no '/admin/profile' route (AdminProfileView is reached via
+  // /admin/profile/:uid from the user-management screens); the Admin Console
+  // overview is the landed page for the profile dropdown.
+  const profilePath = role === 'ADMIN' ? '/admin' : role === 'TRAINER' ? '/trainer/profile' : '/trainee/profile'
 
   const closeAll = () => {
     setNotifOpen(false)

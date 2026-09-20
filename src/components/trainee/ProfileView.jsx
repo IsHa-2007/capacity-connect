@@ -132,7 +132,7 @@ export default function ProfileView() {
               {ach.length ? ach.map((a, i) => (
                 <Achievement key={i} icon={Star} title={a} sub="Professional achievement" />
               )) : (
-                <Achievement icon={Award} title="Forecast Fundamentals" sub="Course Completed" />
+                <p className="text-sm text-slate-muted">No achievements recorded yet. Add them from your professional profile.</p>
               )}
             </div>
           </Card>
@@ -223,7 +223,7 @@ export default function ProfileView() {
                             completionDate: cert.issuedOn,
                             certId: cert.certificateNumber,
                             trainer,
-                            score: cert.score ?? 0,
+                            score: cert.score ?? null,
                           })}
                           className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-medium text-primary hover:bg-sky-light"
                         >

@@ -28,6 +28,24 @@ import { ROLE_TRAINER, ROLE_ADMIN, ROLE_TRAINEE, isApproved } from '../lib/roles
 
 export const MIN_VALID_QUESTIONS = 5
 
+const QUESTION_DIFFICULTIES = ['EASY', 'MEDIUM', 'HARD']
+
+// A question is structurally valid when it satisfies the SAME contract the
+// frozen questions.is_valid column guards (the migration comment says the flag
+// is "computed by the application/migration"). The frontend never sends
+// isValid and the validator strips client-supplied values, so the SERVICE is
+// the computing authority: non-empty text, >= 2 non-empty options, an integer
+// correctOptionIndex inside the options array, and a known difficulty.
+function questionIsStructurallyValid(q) {
+  const options = Array.isArray(q?.options)
+    ? q.options.filter((o) => typeof o === 'string' && String(o).trim().length > 0)
+    : []
+  const textOk = typeof q?.text === 'string' && q.text.trim().length > 0
+  const indexOk = Number.isInteger(q?.correctOptionIndex) && q.correctOptionIndex >= 0 && q.correctOptionIndex < options.length
+  const difficultyOk = QUESTION_DIFFICULTIES.includes(q?.difficulty)
+  return textOk && options.length >= 2 && indexOk && difficultyOk
+}
+
 // ---------------------------------------------------------------------------
 // RBAC HELPERS
 // ---------------------------------------------------------------------------
@@ -73,8 +91,11 @@ function requireOwner(actor, course) {
 
 export async function listCourses(actor, query = {}) {
   requireActor(actor)
+  // Trainees only ever see published courses through the catalog. Trainers and
+  // admins keep the full (status-filtered) view for management.
+  const status = actor.role === ROLE_TRAINEE ? 'PUBLISHED' : query.status
   return repo.listCourses({
-    status: query.status,
+    status,
     trainerId: query.trainerId,
     featured: query.featured !== undefined ? query.featured : undefined,
     limit: Math.min(Number(query.limit) || 200, 200),
@@ -86,6 +107,11 @@ export async function getCourse(actor, courseId) {
   requireActor(actor)
   const course = await repo.findCourseById(courseId)
   if (!course) throw new ApiError(404, 'COURSE_NOT_FOUND', 'The course could not be found.')
+  // Draft courses are management-only; a trainee may never read one (404, not
+  // 403, so the existence of drafts is not disclosed to trainees).
+  if (actor.role === ROLE_TRAINEE && course.status !== 'PUBLISHED') {
+    throw new ApiError(404, 'COURSE_NOT_FOUND', 'The course could not be found.')
+  }
   return course
 }
 
@@ -137,6 +163,11 @@ export async function listSections(actor, courseId) {
   requireActor(actor)
   const course = await repo.findCourseById(courseId)
   if (!course) throw new ApiError(404, 'COURSE_NOT_FOUND', 'The course could not be found.')
+  // Course material (including signed download URLs) is trainer/owner-facing and
+  // admin-facing only. Trainees consume materials through the enrollment
+  // workspace lesson flow, which authorizes per-enrollment — never by pulling
+  // the raw section list of an arbitrary course.
+  if (actor.role !== ROLE_ADMIN) requireOwner(actor, course)
   const sections = await repo.listSectionsForCourse(courseId)
   // Storage-backed materials are served as on-demand signed URLs (the same
   // contract the enrollment workspace uses), never permanent public URLs.
@@ -278,7 +309,11 @@ export async function getQuestion(actor, courseId, questionId) {
 export async function addQuestion(actor, courseId, input) {
   const course = await repo.findCourseById(courseId)
   requireOwner(actor, course)
-  return repo.createQuestionRow({ ...input, course_id: courseId })
+  // The service is the computing authority for questions.is_valid (see
+  // questionIsStructurallyValid). The DB default is FALSE; the repo honors an
+  // explicit isValid when provided.
+  const isValid = questionIsStructurallyValid(input)
+  return repo.createQuestionRow({ ...input, course_id: courseId, isValid })
 }
 
 export async function updateQuestion(actor, courseId, questionId, patch) {
@@ -286,7 +321,11 @@ export async function updateQuestion(actor, courseId, questionId, patch) {
   requireOwner(actor, course)
   const existing = await repo.findQuestionById(courseId, questionId)
   if (!existing) throw new ApiError(404, 'QUESTION_NOT_FOUND', 'The question could not be found.')
-  return repo.updateQuestionRow(questionId, patch)
+  // Recompute is_valid for the MERGED state (existing row + patch): a partial
+  // update may flip any structural field and thus invalidate or re-validate the
+  // row. The repo only trusts the service-computed flag.
+  const merged = { ...existing, ...patch }
+  return repo.updateQuestionRow({ ...patch, isValid: questionIsStructurallyValid(merged) })
 }
 
 export async function removeQuestion(actor, courseId, questionId) {

@@ -92,8 +92,12 @@ export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
       setStartError(OFFLINE_WRITE_MESSAGE)
       return
     }
+    // The backend treats an ABSENT question as "unattempted" (0 marks). A null
+    // optionIndex would fail the zod int schema with a 400, so unanswered
+    // questions are omitted from the payload entirely.
     const answersPayload = assessment.questions
       .map((q, i) => ({ questionId: q.id, optionIndex: answers[i] }))
+      .filter((a) => a.optionIndex !== null)
     const elapsed = (assessment.timeLimitSeconds ?? ASSESSMENT_TIME_SECONDS) - Math.max(0, timeLeft)
     try {
       const res = await submitAssessment(enrollmentId, attemptId, {
@@ -119,12 +123,16 @@ export default function QuizEngine({ enrollmentId, existing, onPass, onFail }) {
   }
 
   useEffect(() => {
-    if (phase === 'running' && timeLeft === 0) {
+    if (phase === 'running' && !paused && timeLeft === 0) {
       clearInterval(timerRef.current)
       submit()
     }
+    // `paused` is a dependency so a timer that hits 0 and is then recovered
+    // (pause → resume with 0:00 left) still auto-submits on resume; without it
+    // the effect would never re-fire because timeLeft stays 0 and phase stays
+    // 'running'. Conversely a pause at 0:00 must NOT submit while offline.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft, phase])
+  }, [timeLeft, phase, paused])
 
   const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
@@ -300,7 +308,7 @@ function IntroView({ onStart, error, existing }) {
 
         <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           <p className="flex items-center gap-2 font-medium"><AlertTriangle size={15} /> Important</p>
-          <p className="mt-1">Once started, the timer cannot be paused. Unanswered questions receive 0 marks. Negative marking applies to incorrect answers.</p>
+          <p className="mt-1">If your connection drops, the timer auto-pauses and your answers and progress are preserved — you resume where you left off. Unanswered questions receive 0 marks. Negative marking applies to incorrect answers.</p>
         </div>
 
         {existing?.percentage != null && (

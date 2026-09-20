@@ -19,8 +19,6 @@ export default function TrainerProfileView() {
 
   const expertise = me?.expertise || currentUser.expertise || []
   const specializations = Array.isArray(currentUser?.specializations) ? currentUser.specializations : []
-  const rating = me?.rating || 4.0
-  const availability = me?.availability ?? true
   const station = me?.station || currentUser.station || '—'
   const experience = me?.experience || currentUser.yearsOfExperience || currentUser.experience || '—'
   const completion = Number(currentUser?.profileCompletion) || 0
@@ -44,6 +42,11 @@ export default function TrainerProfileView() {
       : '—'
 
   const traineesMentored = analytics.activeTrainees
+
+  // A trainer's rating must come from REAL trainee feedback (the same numbers
+  // rendered below), never a hardcoded fallback like the seed-data 4.0.
+  const isBackendProfile = currentUser?.authSource === 'supabase'
+  const rating = isBackendProfile ? (avgAll !== '—' ? avgAll : null) : me?.rating ?? null
 
   return (
     <div className="space-y-6">
@@ -83,7 +86,7 @@ export default function TrainerProfileView() {
             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-muted">
               <span className="inline-flex items-center gap-1"><MapPin size={13} /> {station}</span>
               <span className="inline-flex items-center gap-1"><GraduationCap size={13} /> {currentUser.department}</span>
-              <span className="inline-flex items-center gap-1"><Star size={13} /> {rating} rating</span>
+              {rating != null && <span className="inline-flex items-center gap-1"><Star size={13} /> {rating} rating</span>}
             </div>
           </div>
           <Button onClick={() => setEditing(true)}><Pencil size={15} /> Edit Profile</Button>
@@ -162,7 +165,7 @@ export default function TrainerProfileView() {
             ))}
           </div>
           <div className="mt-4 rounded-xl border border-blue-100 bg-sky-light p-3 text-xs text-primary-deep">
-            <Star size={13} className="inline" /> Availability: {availability ? 'Open for new courses' : 'Currently unavailable'}
+            <Star size={13} className="inline" /> Ratings are computed exclusively from real trainee feedback submitted after assessments.
           </div>
         </Card>
       </div>

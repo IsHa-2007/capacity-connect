@@ -56,7 +56,9 @@ export function exportCertificatePDF(data) {
           <div class="line"><span class="name">${traineeName}</span></div>
           <div class="body">has successfully completed the verified training program</div>
           <div class="body" style="font-size:16px; color:#1F5F93; font-weight:bold;">${courseName}</div>
-          <div class="body">with a final assessment score of <b>${score}%</b>, demonstrating verified scientific competency and operational readiness.</div>
+          ${typeof score === 'number' || (typeof score === 'string' && score.trim() !== '')
+            ? `<div class="body">with a final assessment score of <b>${score}%</b>, demonstrating verified scientific competency and operational readiness.</div>`
+            : '<div class="body">demonstrating verified scientific competency and operational readiness.</div>'}
           <div class="meta">Certificate ID: ${certId} &nbsp;•&nbsp; Issued: ${completionDate}${trainer ? ` &nbsp;•&nbsp; Trainer: ${trainer}` : ''}</div>
           <div class="foot">
             <div>

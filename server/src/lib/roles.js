@@ -22,12 +22,17 @@ export const ROLE_TRAINEE = 'TRAINEE'
 
 /**
  * @param {{role?: string, approvalStatus?: string}} actor Hydrated profile row
- * @returns {boolean} true when the actor is a fully APPROVED ADMIN/TRAINER.
+ * @returns {boolean} true when the actor belongs to ANY platform role
+ * (ADMIN / TRAINER / TRAINEE) and has been APPROVED. This mirrors
+ * `requireApprovedUser` in middleware/authorize.js, which requires
+ * `approval_status === 'APPROVED'` regardless of role — so TRAINEE accounts
+ * (the primary audience of enrollment / assessment / feedback) are approved
+ * users too, not just course-managing ADMINs and TRAINERs.
  */
 export function isApproved(actor) {
   return Boolean(
     actor &&
-      (actor.role === ROLE_TRAINER || actor.role === ROLE_ADMIN) &&
-      actor.approvalStatus === 'APPROVED',
+      actor.approvalStatus === 'APPROVED' &&
+      (actor.role === ROLE_TRAINER || actor.role === ROLE_ADMIN || actor.role === ROLE_TRAINEE),
   )
 }

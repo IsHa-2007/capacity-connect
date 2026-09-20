@@ -583,7 +583,7 @@ function TraineesTable({ course }) {
                               completionDate: t.certificate.issuedOn,
                               certId: t.certificate.id,
                               trainer: course.trainer,
-                              score: t.assessment?.percentage || 82,
+                              score: t.assessment?.percentage ?? null,
                             })
                           }}
                         >

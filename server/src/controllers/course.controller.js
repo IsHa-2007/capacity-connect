@@ -3,10 +3,13 @@
 // Thin HTTP adapter. The authoritative RBAC + business rules live in
 // `services/course.service.js` (single Module 8 authority). This controller:
 //
-//   * Reads the ACTOR purely from `req.user` (the object hydrated by
-//     `middleware/authenticate`). The actor shape supplied by the service's
-//     `findProfileById`-style repository return is
-//     `{ id, role, approvalStatus, ...PROFILE_REST } �?" where:
+//   * Reads the ACTOR via `hydrateActor(req)` (below). `middleware/authenticate`
+//     only sets `{id,email,phone}` on `req.user`; the course service's
+//     `requireTrainer`/`isApproved` read `actor.role` and
+//     `actor.approvalStatus`, so every handler here hydrates the full profile
+//     (`toProfile`) exactly like `middleware/authorize.js` and the enrollment /
+//     assessment controllers do. The actor contract is
+//     `{ id, role, approvalStatus, ...PROFILE_REST }` where:
 //        - `role`            is one of the authorized ROLES (ADMIN/TRAINER/TRAINEE)
 //        - `approvalStatus`  is one of APPROVAL_STATUSES (PENDING/APPROVED/REJECTED)
 //     That is the SAME actor contract `course.service.js` returns from its
@@ -51,42 +54,48 @@ export async function listCourses(req, res, next) {
 
 export async function getCourse(req, res, next) {
   try {
-    const data = await courseService.getCourse(req.user, req.params.id)
+    const actor = await hydrateActor(req)
+    const data = await courseService.getCourse(actor, req.params.id)
     return sendSuccess(res, data)
   } catch (err) { return next(err) }
 }
 
 export async function createCourse(req, res, next) {
   try {
-    const data = await courseService.createCourse(req.user, req.body)
+    const actor = await hydrateActor(req)
+    const data = await courseService.createCourse(actor, req.body)
     return sendSuccess(res, data, 201)
   } catch (err) { return next(err) }
 }
 
 export async function updateCourse(req, res, next) {
   try {
-    const data = await courseService.updateCourse(req.user, req.params.id, req.body)
+    const actor = await hydrateActor(req)
+    const data = await courseService.updateCourse(actor, req.params.id, req.body)
     return sendSuccess(res, data)
   } catch (err) { return next(err) }
 }
 
 export async function deleteCourse(req, res, next) {
   try {
-    const data = await courseService.deleteCourse(req.user, req.params.id)
+    const actor = await hydrateActor(req)
+    const data = await courseService.deleteCourse(actor, req.params.id)
     return sendSuccess(res, data)
   } catch (err) { return next(err) }
 }
 
 export async function listSections(req, res, next) {
   try {
-    const data = await courseService.listSections(req.user, req.params.id)
+    const actor = await hydrateActor(req)
+    const data = await courseService.listSections(actor, req.params.id)
     return sendSuccess(res, data)
   } catch (err) { return next(err) }
 }
 
 export async function addSection(req, res, next) {
   try {
-    const data = await courseService.addSection(req.user, req.params.id, req.body)
+    const actor = await hydrateActor(req)
+    const data = await courseService.addSection(actor, req.params.id, req.body)
     return sendSuccess(res, data, 201)
   } catch (err) { return next(err) }
 }
@@ -110,42 +119,48 @@ export async function uploadSection(req, res, next) {
 
 export async function removeSection(req, res, next) {
   try {
-    const data = await courseService.removeSection(req.user, req.params.id, req.params.sectionId)
+    const actor = await hydrateActor(req)
+    const data = await courseService.removeSection(actor, req.params.id, req.params.sectionId)
     return sendSuccess(res, data)
   } catch (err) { return next(err) }
 }
 
 export async function listQuestions(req, res, next) {
   try {
-    const data = await courseService.listQuestions(req.user, req.params.id)
+    const actor = await hydrateActor(req)
+    const data = await courseService.listQuestions(actor, req.params.id)
     return sendSuccess(res, data)
   } catch (err) { return next(err) }
 }
 
 export async function getQuestion(req, res, next) {
   try {
-    const data = await courseService.getQuestion(req.user, req.params.id, req.params.questionId)
+    const actor = await hydrateActor(req)
+    const data = await courseService.getQuestion(actor, req.params.id, req.params.questionId)
     return sendSuccess(res, data)
   } catch (err) { return next(err) }
 }
 
 export async function addQuestion(req, res, next) {
   try {
-    const data = await courseService.addQuestion(req.user, req.params.id, req.body)
+    const actor = await hydrateActor(req)
+    const data = await courseService.addQuestion(actor, req.params.id, req.body)
     return sendSuccess(res, data, 201)
   } catch (err) { return next(err) }
 }
 
 export async function updateQuestion(req, res, next) {
   try {
-    const data = await courseService.updateQuestion(req.user, req.params.id, req.params.questionId, req.body)
+    const actor = await hydrateActor(req)
+    const data = await courseService.updateQuestion(actor, req.params.id, req.params.questionId, req.body)
     return sendSuccess(res, data)
   } catch (err) { return next(err) }
 }
 
 export async function removeQuestion(req, res, next) {
   try {
-    const data = await courseService.removeQuestion(req.user, req.params.id, req.params.questionId)
+    const actor = await hydrateActor(req)
+    const data = await courseService.removeQuestion(actor, req.params.id, req.params.questionId)
     return sendSuccess(res, data)
   } catch (err) { return next(err) }
 }

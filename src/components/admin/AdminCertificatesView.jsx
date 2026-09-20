@@ -82,7 +82,7 @@ export default function AdminCertificatesView() {
                             completionDate: c.certificate?.issuedOn,
                             certId: c.certificate?.id,
                             trainer: c.trainerName || 'IMD Training Directorate',
-                            score: c.assessment?.percentage || 82,
+                            score: c.assessment?.percentage ?? null,
                           })
                         }
                         className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 py-1.5 text-xs font-medium text-primary hover:bg-sky-light"
