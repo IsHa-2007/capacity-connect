@@ -44,7 +44,18 @@ export function parseOrThrow(schema, value, source = 'body') {
 // Redefine the property on the request instance with an own DATA property so the
 // validated value is visible to controllers exactly as before. `req.body` and
 // `req.params` keep their plain-assignment path.
+//
+// `req.params` is special: several routes run MORE THAN ONE params validator on
+// the same request (e.g. course.routes /:id/questions/:questionId has a
+// `courseIdParamSchema` then a `questionIdParamSchema`). Replacing the whole
+// `req.params` for each would drop the previously-parsed keys, so params are
+// MERGED into the existing object instead of replaced.
 function assignRequestValue(req, key, value) {
+  if (key === 'params') {
+    if (req.params) Object.assign(req.params, value)
+    else req.params = value
+    return
+  }
   try {
     req[key] = value
   } catch {

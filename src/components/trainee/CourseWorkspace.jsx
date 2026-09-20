@@ -40,9 +40,6 @@ const BASE_TABS = [
   { key: 'certificate', label: 'Certificate', icon: Award },
 ]
 
-// Backend section_type -> workspace tab key (Module 11 section plan).
-const SECTION_TAB_KEY = { NOTES: 'notes', SLIDES: 'slides', VIDEOS: 'video', PRACTICE: 'practice' }
-
 // Backend "material" rows ({ id, type, mimeType, fileSize, originalFilename,
 // signedUrl }) => the shape the material section components already use.
 function toUiMaterial(m) {
@@ -248,23 +245,26 @@ export default function CourseWorkspace() {
   }
 
   // Section completion routes through the backend's authoritative ordered gate
-  // (POST /enrollments/:id/progress). Each section step of the current tab is
-  // marked in order; any `ordered` block is surfaced as a message and the
-  // workspace is refreshed so the UI always reflects server state.
-  const completeStep = async (key) => {
+  // (POST /enrollments/:id/progress). The backend only lets a section complete
+  // once every section ordered BEFORE it is done, and the plan is flattened in
+  // GLOBAL order across all material tabs (the lecturer may have uploaded the
+  // tabs interleaved). So instead of bulk-marking every section of the current
+  // tab (which deadlocks on a 409 for the very first click), we advance the
+  // FIRST not-yet-complete section of the global plan — whatever its tab — and
+  // refresh the server state. Repeating it walks the ledger to completion, so
+  // progress always moves forward and the Assessment gate can never stay locked.
+  const completeStep = async (_key) => {
     if (!enrollmentId) return
-    const steps = sectionPlan.filter((s) => SECTION_TAB_KEY[s.sectionType] === key)
-    if (!steps.length) return
+    if (!sectionPlan.length) return
     setNotice(null)
-    for (const step of steps) {
-      try {
-        await enrollmentApi.markSectionComplete(enrollmentId, step.sectionId)
-        await refreshWorkspace()
-      } catch (err) {
-        await refreshWorkspace()
-        setNotice(err?.message || 'Your progress could not be updated right now.')
-        break
-      }
+    const firstIncomplete = sectionPlan.find((s) => (progressValue ?? 0) < s.milestone)
+    if (!firstIncomplete) return
+    try {
+      await enrollmentApi.markSectionComplete(enrollmentId, firstIncomplete.sectionId)
+      await refreshWorkspace()
+    } catch (err) {
+      await refreshWorkspace()
+      setNotice(err?.message || 'Your progress could not be updated right now.')
     }
   }
 

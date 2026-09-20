@@ -32,7 +32,7 @@ export const CERTIFICATES_BASE = `
 export const CERTIFICATES_LIST_SELECT = `
   id, enrollment_id, user_id, course_id, certificate_number,
   legacy_certificate_id, issued_on, issued_by, created_at,
-  users ( name ),
+  users!certificates_user_id_fkey ( name ),
   enrollments ( assessment_percentage, status ),
   courses ( title, domain )
 `

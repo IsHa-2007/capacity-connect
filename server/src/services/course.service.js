@@ -174,7 +174,7 @@ export async function listSections(actor, courseId) {
   return Promise.all(
     sections.map(async (section) => {
       if (!section.storagePath) return section
-      const { signedUrl } = await storageCreateSignedUrl(section.storagePath)
+      const signedUrl = await storageCreateSignedUrl(section.storagePath)
       return { ...section, signedUrl: signedUrl || null }
     }),
   )
@@ -325,7 +325,7 @@ export async function updateQuestion(actor, courseId, questionId, patch) {
   // update may flip any structural field and thus invalidate or re-validate the
   // row. The repo only trusts the service-computed flag.
   const merged = { ...existing, ...patch }
-  return repo.updateQuestionRow({ ...patch, isValid: questionIsStructurallyValid(merged) })
+  return repo.updateQuestionRow(questionId, { ...patch, isValid: questionIsStructurallyValid(merged) })
 }
 
 export async function removeQuestion(actor, courseId, questionId) {

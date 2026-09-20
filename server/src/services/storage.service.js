@@ -43,7 +43,9 @@ export async function createSignedUrl(path, expiresInSeconds = 3600) {
     .from(STORAGE_BUCKET)
     .createSignedUrl(path, expiresInSeconds)
   if (error) throw new ApiError(400, 'STORAGE_SIGNED_URL_FAILED', error.message)
-  return data
+  // Supabase returns { data: { signedUrl } }. Resolve to the STRING here so
+  // every caller receives the actual fetchable URL — never the wrapper object.
+  return data?.signedUrl ?? null
 }
 
 export async function remove(paths) {
