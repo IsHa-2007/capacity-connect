@@ -112,7 +112,7 @@ export default function TrainerHomeView() {
             Manage your scientific courses, question banks, and trainee performance from a single command center.
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
-            <Button className="bg-white text-primary hover:bg-sky-light" disabled={isPending} onClick={() => navigate('/trainer/courses?new=1')}>
+            <Button disabled={isPending} onClick={() => navigate('/trainer/courses?new=1')}>
               <Plus size={16} /> Create New Course
             </Button>
             <Button className="bg-white/20 text-white hover:bg-white/30" onClick={() => navigate('/trainer/courses')}>

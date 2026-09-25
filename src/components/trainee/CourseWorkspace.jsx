@@ -253,7 +253,15 @@ export default function CourseWorkspace() {
     )
   }
 
-  const course = workspace.course || activeCourse
+  const courseBase = workspace.course || activeCourse
+  // The workspace course is the authoritative live shape but carries only
+  // trainerId (raw backend), while the catalog course holds the resolved real
+  // trainer name (hydrated from /users/:id). Fill it in when the workspace
+  // course lacks it so the certificate/header show the real trainer name.
+  const course =
+    courseBase && !workspace.course?.trainer && activeCourse?.trainer
+      ? { ...courseBase, trainer: activeCourse.trainer }
+      : courseBase
   const en = workspace.enrollment
   const materials = workspace.materials || { notes: [], slides: [], videos: [], practice: [] }
   const progressValue = workspace.progress?.value ?? en?.progress ?? 0

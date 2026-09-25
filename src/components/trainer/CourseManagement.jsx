@@ -1,10 +1,9 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BookOpen,
   CheckSquare,
   ChevronLeft,
-  Download,
   Eye,
   FileText,
   FileUp,
@@ -23,14 +22,14 @@ import {
 } from 'lucide-react'
 import { Card, Button, Badge, Tabs, Modal, EmptyState } from '../common/ui'
 import InAppFileViewer from '../profile/InAppFileViewer'
+import PublicProfileView from '../profile/PublicProfileView'
 import { useCourses } from '../../context/CourseContext'
 import { forFolderError, isValidQuestion, MIN_VALID_QUESTIONS } from '../../services/courseService'
-import { exportCertificatePDF } from '../../utils/pdfExport'
 
 // Module 3 course workspace. The five content/publishing stages map to:
 // Study Notes, Slide Decks, Video Lectures, Practice, then Assessment (Question
 // Bank). Draft courses are owner-only; published courses join the shared catalog.
-const SECTIONS = ['Details', 'Study Notes', 'Slide Decks', 'Video Lectures', 'Practice', 'Trainees', 'Question Bank', 'Analytics']
+const SECTIONS = ['Details', 'Study Notes', 'Slide Decks', 'Video Lectures', 'Practice', 'Question Bank', 'Analytics', 'Trainees']
 
 export default function CourseManagement({ courseId }) {
   const { courseById, updateCourse, publishCourse, togglePublish } = useCourses()
@@ -94,9 +93,9 @@ export default function CourseManagement({ courseId }) {
         {tab === 'Slide Decks' && <SectionManager course={course} section="slides" icon={Presentation} title="Slide Decks" empty="No slide decks yet. Upload PPT / PDF decks." />}
         {tab === 'Video Lectures' && <VideoManager course={course} />}
         {tab === 'Practice' && <SectionManager course={course} section="practice" icon={FileText} title="Practice Material" empty="No practice material yet. Upload practice sets / problems." />}
-        {tab === 'Trainees' && <TraineesTable course={course} />}
         {tab === 'Question Bank' && <QuestionBank course={course} />}
         {tab === 'Analytics' && <TrainerAnalytics course={course} />}
+        {tab === 'Trainees' && <TraineesTable course={course} />}
       </div>
 
       <EditCourseModal
@@ -519,9 +518,39 @@ function VideoManager({ course }) {
 
 function TraineesTable({ course }) {
   const { traineesForCourse } = useCourses()
-  const navigate = useNavigate()
+  const [selected, setSelected] = useState(null)
   const rows = traineesForCourse(course.id)
   const completed = rows.filter((e) => e.status === 'completed').length
+
+  // TEMPORARY task-6 diagnostics — remove after verification.
+  useEffect(() => {
+    if (!selected) return
+    console.debug('[profile-debug] selected trainee row', {
+      traineeId: selected.traineeId,
+      traineeName: selected.traineeName,
+      courseTitle: selected.courseTitle,
+      status: selected.status,
+      stage: selected.stage,
+      progress: selected.progress,
+      hasAssessment: Boolean(selected.assessment),
+      hasCertificate: Boolean(selected.certificate),
+      rowKeys: Object.keys(selected),
+    })
+  }, [selected])
+
+  if (selected) {
+    return (
+      <Card className="p-6 sm:p-8">
+        <PublicProfileView
+          uid={selected.traineeId}
+          enrollment={{ ...selected, courseTitle: selected.courseTitle || course.title }}
+          onBack={() => setSelected(null)}
+          backLabel="Back to Trainees"
+        />
+      </Card>
+    )
+  }
+
   return (
     <Card className="overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4">
@@ -547,7 +576,7 @@ function TraineesTable({ course }) {
             </thead>
             <tbody className="divide-y divide-border-subtle">
               {rows.map((t) => (
-                <tr key={`${t.courseId}:${t.traineeId || t.id || t.courseId}`} className="group cursor-pointer transition-colors hover:bg-sky-soft/50" onClick={() => navigate(`/trainer/profile/${t.traineeId}`)}>
+                <tr key={`${t.courseId}:${t.traineeId || t.id || t.courseId}`} className="group cursor-pointer transition-colors hover:bg-sky-soft/50" onClick={() => setSelected(t)}>
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-3">
                       <span className="grid h-9 w-9 place-items-center rounded-lg bg-sky-light text-sm font-semibold text-primary">
@@ -572,30 +601,13 @@ function TraineesTable({ course }) {
                     {t.certificate ? (
                       <div className="flex items-center gap-2">
                         <Badge tone="green"><Award size={13} /> Issued</Badge>
-                        <Button
-                          variant="subtle"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            exportCertificatePDF({
-                              traineeName: t.traineeName || t.traineeId || 'Trainee',
-                              courseName: course.title,
-                              completionDate: t.certificate.issuedOn,
-                              certId: t.certificate.id,
-                              trainer: course.trainer,
-                              score: t.assessment?.percentage ?? null,
-                            })
-                          }}
-                        >
-                          <Download size={13} /> PDF
-                        </Button>
                       </div>
                     ) : (
                       <span className="text-slate-muted">—</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Button variant="subtle" onClick={(e) => { e.stopPropagation(); navigate(`/trainer/profile/${t.traineeId}`); }}>View Profile</Button>
+                    <Button variant="subtle" onClick={(e) => { e.stopPropagation(); setSelected(t); }}>View Profile</Button>
                   </td>
                 </tr>
               ))}

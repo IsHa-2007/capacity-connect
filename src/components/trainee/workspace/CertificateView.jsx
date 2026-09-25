@@ -138,7 +138,7 @@ export default function CertificateView({ course, enrollmentId }) {
 
       {/* Certificate */}
       <Card className="p-8">
-        <div className="relative mx-auto max-w-3xl overflow-hidden rounded-2xl border-4 border-double border-primary/60 bg-gradient-to-br from-white to-sky-light p-10 text-center">
+        <div className="relative mx-auto max-w-4xl overflow-hidden rounded-2xl border-4 border-double border-primary/60 bg-gradient-to-br from-white to-sky-light px-10 py-8 text-center">
           {/* watermark */}
           <div className="pointer-events-none absolute inset-0 opacity-[0.06]">
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -156,11 +156,11 @@ export default function CertificateView({ course, enrollmentId }) {
             <LogoBadge label="MoES" />
           </div>
 
-          <div className="relative mt-10">
+          <div className="relative mt-6">
             <p className="text-sm font-semibold uppercase tracking-[0.35em] text-secondary">Certificate of Completion</p>
             <p className="mt-2 text-xs uppercase tracking-widest text-slate-muted">of scientific capacity & training readiness</p>
 
-            <div className="mx-auto mt-6 border-b-2 border-border-soft sm:w-80">
+            <div className="mx-auto mt-6 border-b-2 border-border-soft sm:w-96">
               <p className="pb-2 text-3xl font-serif font-semibold text-primary-deep">{traineeName}</p>
             </div>
 
@@ -172,7 +172,7 @@ export default function CertificateView({ course, enrollmentId }) {
               <Badge tone="green"><CheckCircle2 size={13} /> Final Assessment Score: {percentage != null ? `${percentage}%` : '—'}</Badge>
             </div>
 
-            <div className="mx-auto mt-8 grid max-w-md grid-cols-2 gap-6">
+            <div className="mx-auto mt-6 grid max-w-xl grid-cols-2 gap-6">
               <div>
                 <p className="text-xs text-slate-muted">Certificate ID</p>
                 <p className="text-sm font-semibold text-primary-deep">{certificateNumber}</p>
@@ -185,7 +185,7 @@ export default function CertificateView({ course, enrollmentId }) {
           </div>
 
           {/* Signature area */}
-          <div className="relative mt-10 flex items-end justify-between">
+          <div className="relative mt-8 flex items-end justify-between">
             <div className="text-left">
               <div className="w-40 border-t border-slate-body pt-1.5">
                 <p className="text-xs text-slate-body">{course?.trainer || '—'}</p>
