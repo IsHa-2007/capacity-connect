@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { broadcasts as seedBroadcasts } from '../data/mockData'
 import { useAuth } from './AuthContext'
+import { DEMO_MODE } from '../utils/demoDataMode'
 import * as broadcastApi from '../services/broadcastApi'
 
 const BroadcastContext = createContext(null)
@@ -30,9 +31,11 @@ export function BroadcastProvider({ children }) {
   const [broadcasts, setBroadcasts] = useState(() => seedBroadcasts.map(normalizeSeed))
 
   // Real (supabase) sessions read the authoritative, audience-filtered list the
-  // backend returns for this caller; the in-memory mock path stays unchanged.
+  // backend returns for this caller; the in-memory demo path stays unchanged.
+  // DEV demo mode keeps the seeded list on display (read-only surface) even for
+  // real admins, but publishing always goes to the backend.
   useEffect(() => {
-    if (!currentUser || !backendActive) return
+    if (!currentUser || !backendActive || DEMO_MODE) return
     let active = true
     broadcastApi
       .listBroadcasts()

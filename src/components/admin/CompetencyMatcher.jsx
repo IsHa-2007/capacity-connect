@@ -5,6 +5,7 @@ import { DOMAINS, courses as mockCourses, trainers } from '../../data/mockData'
 import { rankTrainersForDomain } from '../../utils/matchingAlgorithm'
 import { useAuth } from '../../context/AuthContext'
 import { useCourses } from '../../context/CourseContext'
+import { DEMO_MODE } from '../../utils/demoDataMode'
 import * as userApi from '../../services/userApi'
 
 const DOMAIN_OPTIONS = Array.from(new Set([...DOMAINS, ...mockCourses.map((c) => c.domain)]))
@@ -49,13 +50,18 @@ export default function CompetencyMatcher() {
   const { currentUser } = useAuth()
   const { courses } = useCourses()
   const backendActive = Boolean(currentUser && currentUser.authSource === 'supabase')
+  // DEV demo mode: this is a read-only ranking surface, so a REAL admin session
+  // still ranks the seeded trainer roster with realistic names when the flag is
+  // on. The backend directory stays authoritative whenever the flag is off.
+  const realSource = backendActive && !DEMO_MODE
   const [domain, setDomain] = useState('')
   const [trainerProfiles, setTrainerProfiles] = useState(null) // null = loading
 
   // Real backend directory of APPROVED trainers (ADMIN endpoint). Loaded once
-  // so the matcher never shows the seed/demo trainer roster to real admins.
+  // so the matcher never shows the seed/demo trainer roster to real admins (except
+  // when DEV demo mode is explicitly enabled).
   useEffect(() => {
-    if (!backendActive) return
+    if (!realSource) return
     let mounted = true
     userApi
       .listUsers()
@@ -72,7 +78,7 @@ export default function CompetencyMatcher() {
     return () => {
       mounted = false
     }
-  }, [backendActive])
+  }, [realSource])
 
   // Real domain list where available (from the live course catalog); the mock
   // DOMAINS stay only as the dev-mock fallback.
@@ -83,23 +89,23 @@ export default function CompetencyMatcher() {
 
   const ranked = useMemo(() => {
     if (!domain) return []
-    if (backendActive) {
+    if (realSource) {
       return (trainerProfiles || [])
         .map((p) => ({ trainer: p, match: scoreTrainer(p, domain) }))
         .sort((a, b) => b.match.percentage - a.match.percentage)
     }
     return rankTrainersForDomain(trainers, domain)
-  }, [domain, backendActive, trainerProfiles])
+  }, [domain, realSource, trainerProfiles])
 
   const noMatch = domain && ranked.length === 0
-  const loadingBackend = backendActive && trainerProfiles === null
+  const loadingBackend = realSource && trainerProfiles === null
 
   return (
     <div className="space-y-5">
       <div>
         <h2 className="text-xl font-semibold text-primary-deep">Trainer-to-Subject Matching Engine</h2>
         <p className="text-sm text-slate-muted">
-          {backendActive
+          {realSource
             ? 'Ranking real approved trainers by their recorded expertise and experience against each domain.'
             : 'Weighted recommendation combining domain expertise, feedback, rating, availability, and past performance.'}
         </p>
@@ -166,14 +172,14 @@ export default function CompetencyMatcher() {
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-slate-muted">
                       <span className="inline-flex items-center gap-1">
-                        <Briefcase size={13} /> {backendActive
+                        <Briefcase size={13} /> {realSource
                           ? (trainer.yearsOfExperience ? `${trainer.yearsOfExperience} yrs` : '—')
                           : (trainer.experience || '—')}
                       </span>
-                      {!backendActive && trainer.rating != null && (
+                      {!realSource && trainer.rating != null && (
                         <span>{trainer.rating} rating</span>
                       )}
-                      {backendActive && trainer.station && <span>{trainer.station}</span>}
+                      {realSource && trainer.station && <span>{trainer.station}</span>}
                     </div>
                   </div>
                 </div>
@@ -184,14 +190,14 @@ export default function CompetencyMatcher() {
               </div>
 
               <div className="mt-4 flex flex-wrap gap-1.5">
-                {(backendActive
+                {(realSource
                   ? [...(trainer.expertise || []), ...(trainer.specializations || [])]
                   : (trainer.expertise || [])
                 ).map((e) => <Badge key={e}>{e}</Badge>)}
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-5">
-                {backendActive ? (
+                {realSource ? (
                   <>
                     <Factor label="Domain" val={match.breakdown.domain} />
                     <Factor label="Experience" val={match.breakdown.experience} />

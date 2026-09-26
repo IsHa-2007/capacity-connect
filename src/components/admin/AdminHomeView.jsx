@@ -14,18 +14,25 @@ import {
 import { Card, StatCard, Badge } from '../common/ui'
 import { useAuth } from '../../context/AuthContext'
 import { useCourses } from '../../context/CourseContext'
+import { DEMO_MODE } from '../../utils/demoDataMode'
 import * as analyticsApi from '../../services/analyticsApi'
+import * as userService from '../../services/userService'
 
 export default function AdminDashboardView() {
-  const { pendingUsers, currentUser } = useAuth()
+  const { pendingUsers, currentUser, allUsers } = useAuth()
   const { courses, competencyRecords } = useCourses()
   const backendActive = currentUser?.authSource === 'supabase'
+  // DEV demo mode: the read-only summary figures render from the seeded demo
+  // directory; the verification queue below ALWAYS stays real (approvals are
+  // writes and must keep hitting the backend).
+  const realSource = backendActive && !DEMO_MODE
   const [summary, setSummary] = useState(null)
+  const [demoCounts, setDemoCounts] = useState(null)
 
   // Real (supabase) admins read the authoritative platform summary; the mock
   // path keeps deriving figures from the seeded stores used for demos.
   useEffect(() => {
-    if (!backendActive) return
+    if (!realSource) return
     let active = true
     analyticsApi
       .getInsights()
@@ -40,7 +47,34 @@ export default function AdminDashboardView() {
     return () => {
       active = false
     }
-  }, [backendActive])
+  }, [realSource])
+
+  // DEV demo mode: same fields the backend summary reports, derived from the
+  // seeded directory (never hardcoded constants). Pending approvals are NOT
+  // taken from here — the queue is a real write surface.
+  useEffect(() => {
+    if (!DEMO_MODE) return
+    let active = true
+    userService
+      .getAllUsers()
+      .then((all) => {
+        if (!active) return
+        const list = Array.isArray(all) ? all : []
+        const approved = list.filter((u) => String(u.approvalStatus || '').toUpperCase() === 'APPROVED')
+        setDemoCounts({
+          approvedTrainees: approved.filter((u) => u.role === 'TRAINEE').length,
+          approvedTrainers: approved.filter((u) => u.role === 'TRAINER').length,
+          stationCount: new Set(approved.map((u) => u.station).filter(Boolean)).size,
+          regionCount: new Set(approved.map((u) => u.region).filter(Boolean)).size,
+        })
+      })
+      .catch(() => {
+        if (active) setDemoCounts(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const pending = pendingUsers.length
   const activeCourses = courses.filter((c) => c.status === 'published').length
@@ -48,15 +82,26 @@ export default function AdminDashboardView() {
     ? Math.round(competencyRecords.reduce((s, r) => s + r.competency, 0) / competencyRecords.length)
     : null
 
-  const stat = (key, fallback) =>
-    backendActive ? (summary && summary[key] != null ? summary[key] : null) : fallback
+  // DEV/mock summaries derive figures from the seeded user store (same fields
+  // the backend summary reports) — never hardcoded constants.
+  const approved = (allUsers || []).filter((u) => (u.status || u.approvalStatus || '').toLowerCase() === 'approved')
+  const approvedTrainees = approved.filter((u) => u.role === 'TRAINEE').length
+  const approvedTrainers = approved.filter((u) => u.role === 'TRAINER').length
+  const approvedStations = new Set(approved.map((u) => u.station).filter(Boolean)).size
+  const approvedRegions = new Set(approved.map((u) => u.region).filter(Boolean)).size
 
-  const trainees = stat('approvedTrainees', null)
-  const trainers = stat('approvedTrainers', null)
-  const stationCount = stat('stationCount', null)
-  const regionCount = stat('regionCount', null)
+  const stat = (key, fallback) => {
+    if (realSource) return summary && summary[key] != null ? summary[key] : null
+    if (DEMO_MODE) return demoCounts && demoCounts[key] != null ? demoCounts[key] : fallback
+    return fallback
+  }
+
+  const trainees = stat('approvedTrainees', approvedTrainees)
+  const trainers = stat('approvedTrainers', approvedTrainers)
+  const stationCount = stat('stationCount', approvedStations)
+  const regionCount = stat('regionCount', approvedRegions)
   const runningCourses = stat('publishedCourses', activeCourses)
-  const competency = backendActive ? summary?.avgAssessmentPercentage ?? null : avgCompetency
+  const competency = realSource ? (summary?.avgAssessmentPercentage ?? null) : avgCompetency
 
   return (
     <div className="space-y-8">
@@ -79,7 +124,7 @@ export default function AdminDashboardView() {
       {/* Summary metrics — every figure comes from the authoritative backend
           (or is left blank) instead of a hardcoded placeholder. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <StatCard icon={ShieldCheck} label="Pending Approvals" value={backendActive ? (summary?.pendingApprovals ?? '—') : pending} tone="amber" />
+        <StatCard icon={ShieldCheck} label="Pending Approvals" value={realSource ? (summary?.pendingApprovals ?? '—') : pending} tone="amber" />
         <StatCard icon={Users} label="Active Trainees" value={trainees ?? '—'} />
         <StatCard icon={UserCheck} label="Verified Trainers" value={trainers ?? '—'} tone="green" />
         <StatCard icon={Map} label="Regional Coverage" value={stationCount ?? '—'} sub={regionCount ? `${regionCount} regions` : 'stations'} tone="navy" />

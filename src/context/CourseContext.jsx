@@ -1,6 +1,7 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react'
 import { seedCompetencyRecords, stationRegionMap } from '../data/mockData'
 import { useAuth } from './AuthContext'
+import { DEMO_MODE } from '../utils/demoDataMode'
 import * as courseService from '../services/courseService'
 import { ownedTrainerIds } from '../utils/trainerOwnership'
 import * as courseApi from '../services/courseApi'
@@ -19,6 +20,14 @@ export function CourseProvider({ children }) {
 
   const backendActive = Boolean(currentUser && currentUser.authSource === 'supabase')
 
+  // DEV demo mode: a REAL ADMIN still reads the seeded demo course/enrollment
+  // catalog so the dashboard and admin surfaces render populated data for demos.
+  // It is deliberately only the ADMIN role and only affects READS — real
+  // trainees/trainers keep the authoritative (possibly empty) backend catalog so
+  // their enroll/course-management actions can never touch demo rows.
+  const demoReadMode = DEMO_MODE && currentUser?.role === 'ADMIN'
+  const realSource = backendActive && !demoReadMode
+
   // Load the course catalog for the current user. Real (supabase) users read the
   // authoritative backend (trainees see only PUBLISHED courses; trainers/admins
   // see every course they are entitled to). Trainer-owned courses are hydrated
@@ -26,7 +35,7 @@ export function CourseProvider({ children }) {
   // working against persisted data. The in-memory dev-mock path is unchanged.
   useEffect(() => {
     if (!currentUser) return
-    if (backendActive) {
+    if (realSource) {
       let active = true
       setCourses([])
       ;(async () => {
@@ -95,7 +104,7 @@ export function CourseProvider({ children }) {
     return () => {
       active = false
     }
-  }, [currentUser, backendActive])
+  }, [currentUser, realSource])
 
   // User-scoped enrollments (traineeId + trainerId + courseId) which also carry
   // the course certificate once a course is completed. Seeded from the service's
@@ -137,7 +146,7 @@ export function CourseProvider({ children }) {
   // complete. The in-memory dev-mock path is unchanged.
   useEffect(() => {
     if (!currentUser) return
-    if (backendActive) {
+    if (realSource) {
       let active = true
       setEnrollments([])
       syncEnrollments()
@@ -161,7 +170,7 @@ export function CourseProvider({ children }) {
     return () => {
       active = false
     }
-  }, [currentUser, backendActive, syncEnrollments])
+  }, [currentUser, realSource, syncEnrollments])
 
   // Backend trainer dashboards show live enrolled counts per course; reconcile
   // them from the role-scoped backend enrollment rows when those rows change.

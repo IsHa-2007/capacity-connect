@@ -15,6 +15,7 @@ import {
 import { useAuth } from '../../context/AuthContext'
 import { useBroadcasts } from '../../context/BroadcastContext'
 import { useCourses } from '../../context/CourseContext'
+import { DEMO_MODE } from '../../utils/demoDataMode'
 import { getSearchableUsers } from '../../services/userService'
 import * as notificationApi from '../../services/notificationApi'
 import { useOfflineWriteGuard } from '../../offline/useConnectivity'
@@ -53,13 +54,16 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
   )
 
   // Backend-generated notifications (broadcast fan-out + certificate issuance).
-  // Mock sessions keep deriving their feed from the seeded broadcasts; real
-  // (supabase) sessions read + mutate the authoritative notification store.
+  // Demo sessions (and DEV demo mode with a real account) derive the feed from
+  // the seeded broadcasts as a read-only surface; real sessions read + mutate
+  // the authoritative notification store.
   const [backendNotifs, setBackendNotifs] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
 
+  const useBackendNotifs = backendActive && !DEMO_MODE
+
   useEffect(() => {
-    if (!backendActive) return
+    if (!useBackendNotifs) return
     let active = true
     Promise.all([notificationApi.listNotifications(), notificationApi.getUnreadCount()])
       .then(([list, count]) => {
@@ -74,14 +78,14 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
     return () => {
       active = false
     }
-  }, [backendActive])
+  }, [useBackendNotifs])
 
   const mockNotifs = myBroadcasts.slice(0, 5).map((b) => ({ ...b, isRead: false }))
-  const displayNotifs = backendActive ? backendNotifs : mockNotifs
-  const badgeCount = backendActive ? unreadCount : myBroadcasts.length
+  const displayNotifs = useBackendNotifs ? backendNotifs : mockNotifs
+  const badgeCount = useBackendNotifs ? unreadCount : myBroadcasts.length
 
   const markAllRead = async () => {
-    if (!backendActive) return
+    if (!useBackendNotifs) return
     if (!guardWrite()) return
     try {
       await notificationApi.markAllNotificationsRead()
@@ -94,7 +98,7 @@ export default function Navbar({ title = 'CAPACITY CONNECT', onMenu }) {
   }
 
   const readNotification = async (n) => {
-    if (!backendActive || n.isRead) return
+    if (!useBackendNotifs || n.isRead) return
     if (!guardWrite()) return
     try {
       await notificationApi.markNotificationRead(n.id)

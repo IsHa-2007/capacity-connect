@@ -3,6 +3,7 @@ import { AlertTriangle, Map as MapIcon, TrendingUp } from 'lucide-react'
 import { Card, Badge, ProgressBar } from '../common/ui'
 import { useCourses } from '../../context/CourseContext'
 import { useAuth } from '../../context/AuthContext'
+import { DEMO_MODE } from '../../utils/demoDataMode'
 import { regionalCompetency } from '../../data/mockData'
 import * as analyticsApi from '../../services/analyticsApi'
 import OfficerDispatchPanel from './OfficerDispatchPanel'
@@ -62,11 +63,17 @@ export default function RegionalHeatmap() {
   const { currentUser } = useAuth()
   const backendActive = currentUser?.authSource === 'supabase'
 
+  // DEV demo mode (VITE_DEMO_MODE=true): the heatmap, dispatch panel and station
+  // table are read-only surfaces, so even a REAL admin session renders them from
+  // the seeded demo dataset. Real backend analytics stay authoritative whenever
+  // the demo flag is off.
+  const realSource = backendActive && !DEMO_MODE
+
   const [apiRegional, setApiRegional] = useState(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!backendActive) return
+    if (!realSource) return
     let active = true
     setLoading(true)
     analyticsApi
@@ -85,12 +92,12 @@ export default function RegionalHeatmap() {
     return () => {
       active = false
     }
-  }, [backendActive])
+  }, [realSource])
 
-  // Backend path uses real assessment aggregates; the in-memory mock path keeps
+  // Backend path uses real assessment aggregates; the in-memory demo path keeps
   // deriving live figures from the seeded competency records.
   const regions = useMemo(() => {
-    if (backendActive) return regionsFromApi(apiRegional)
+    if (realSource) return regionsFromApi(apiRegional)
     return regionalCompetency.map((r) => {
       const regionRecords = competencyRecords.filter((rec) => stationRegionMap[rec.station] === r.region)
       let competency = r.competency
@@ -113,7 +120,7 @@ export default function RegionalHeatmap() {
         domainCount: Object.keys(recordsByDomain).length,
       }
     })
-  }, [backendActive, apiRegional, competencyRecords, stationRegionMap])
+  }, [realSource, apiRegional, competencyRecords, stationRegionMap])
 
   const defaultRegion = regions[2] || regions[0]
   const [activeId, setActiveId] = useState(null)
@@ -237,7 +244,7 @@ export default function RegionalHeatmap() {
 
       {/* Regional Officer Dispatch — full-width so the workflow has room to breathe */}
       <Card className="p-6">
-        <OfficerDispatchPanel key={activeRegion?.id} region={activeRegion} regions={regions} backendActive={backendActive} />
+        <OfficerDispatchPanel key={activeRegion?.id} region={activeRegion} regions={regions} backendActive={realSource} />
       </Card>
 
       {/* Station level table */}

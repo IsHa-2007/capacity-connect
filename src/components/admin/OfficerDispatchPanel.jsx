@@ -14,6 +14,9 @@ import { Badge, Button, EmptyState, LoadingState, ProgressBar } from '../common/
 import { isApiHttpError } from '../../services/api'
 import * as analyticsApi from '../../services/analyticsApi'
 import * as userApi from '../../services/userApi'
+import * as officerDispatchService from '../../services/officerDispatchService'
+import * as userService from '../../services/userService'
+import { DEMO_MODE } from '../../utils/demoDataMode'
 
 // MODULE 17A/17B — REGIONAL OFFICER DISPATCH PANEL
 //
@@ -81,6 +84,13 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
   const [selectedRegionName, setSelectedRegionName] = useState(region?.name || '')
   const [approvedUsers, setApprovedUsers] = useState([])
 
+  // Real (Supabase) sessions use the backend-authoritative analytics service;
+  // DEV/mock sessions — and read-only demo-mode sessions — use the in-memory
+  // mirror (same shapes, same match rules), so seeded fake officers are never
+  // written to the real duty-assignment table.
+  const useMockSource = !backendActive || DEMO_MODE
+  const dispatchApi = useMockSource ? officerDispatchService : analyticsApi
+
   // Region options reuse the SAME real region data already rendered by the
   // Regional Heatmap — never a second, hardcoded region list.
   const regionOptions = regions.length ? regions : region ? [region] : []
@@ -92,12 +102,13 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
   // exact fields the backend matcher compares against) plus any real heatmap
   // domains — never a hardcoded skill list.
   useEffect(() => {
-    if (!backendActive) return
     let active = true
-    userApi
-      .listUsers()
-      .then((data) => {
-        if (active) setApprovedUsers((data?.users || []).filter((u) => u.approvalStatus === 'APPROVED'))
+    const load = useMockSource
+      ? () => userService.getAllUsers().then((all) => all.filter((u) => String(u.approvalStatus || '').toUpperCase() === 'APPROVED'))
+      : () => userApi.listUsers().then((data) => (data?.users || []).filter((u) => u.approvalStatus === 'APPROVED'))
+    load()
+      .then((users) => {
+        if (active) setApprovedUsers(users)
       })
       .catch(() => {
         if (active) setApprovedUsers([])
@@ -105,7 +116,7 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
     return () => {
       active = false
     }
-  }, [backendActive])
+  }, [useMockSource])
 
   const capabilities = useMemo(() => {
     const set = new Set()
@@ -134,10 +145,10 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
   )
 
   const loadRoster = useCallback(async () => {
-    if (!backendActive || !regionName) return
+    if (!regionName) return
     setRoster((prev) => ({ ...prev, status: 'loading', error: '' }))
     try {
-      const data = await analyticsApi.listAssignments({ region: regionName })
+      const data = await dispatchApi.listAssignments({ region: regionName })
       setRoster({ status: 'ready', items: data.assignments || [], error: '' })
     } catch (err) {
       setRoster({
@@ -146,7 +157,7 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
         error: isApiHttpError(err) ? err.message : 'Unable to load the duty roster.',
       })
     }
-  }, [backendActive, regionName])
+  }, [dispatchApi, regionName])
 
   useEffect(() => {
     loadRoster()
@@ -176,7 +187,7 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
     setError('')
     setDispatch({ status: 'idle', message: '', details: null })
     try {
-      const data = await analyticsApi.findOfficerMatches({
+      const data = await dispatchApi.findOfficerMatches({
         regionKey: regionName,
         capability: cap,
         requiredCount: Number(requiredCount) || 1,
@@ -205,7 +216,7 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
     if (!result || !selected.length) return
     setDispatch({ status: 'working', message: '', details: null })
     try {
-      const data = await analyticsApi.dispatchOfficers({
+      const data = await dispatchApi.dispatchOfficers({
         regionKey: result.regionKey,
         capability: result.capability,
         requiredCount: result.requiredCount,
@@ -235,7 +246,7 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
     setRowBusy(assignmentId)
     setDispatch({ status: 'idle', message: '', details: null })
     try {
-      await analyticsApi.updateAssignmentStatus(assignmentId, status)
+      await dispatchApi.updateAssignmentStatus(assignmentId, status)
       await loadRoster()
     } catch (err) {
       setRoster((prev) => ({
@@ -260,14 +271,7 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
         Find approved officers who hold a required capability in this region, review their match, and dispatch.
       </p>
 
-      {!backendActive ? (
-        <div className="mt-4 flex items-start gap-2 rounded-xl border border-border-subtle bg-sky-soft px-3 py-2 text-sm text-slate-body">
-          <Info size={16} className="mt-0.5 shrink-0 text-primary" />
-          <span>Officer discovery is available when this deployment is connected to the capacity backend.</span>
-        </div>
-      ) : (
-        <>
-          <form className="mt-4 space-y-3" onSubmit={findOfficers}>
+        <form className="mt-4 space-y-3" onSubmit={findOfficers}>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block min-w-0">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-muted">Region</span>
@@ -546,8 +550,6 @@ export default function OfficerDispatchPanel({ region, regions = [], backendActi
               </div>
             )}
           </div>
-        </>
-      )}
     </div>
   )
 }

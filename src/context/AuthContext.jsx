@@ -13,6 +13,7 @@ import * as userApi from '../services/userApi'
 import { cloudPhotoUrl } from '../services/userApi'
 import { getAccessToken, setAccessToken, clearAccessToken, isApiHttpError } from '../services/api'
 import * as userService from '../services/userService'
+import { DEMO_MODE } from '../utils/demoDataMode'
 // M18.3 — auth transitions invalidate the bounded read-only runtime API cache so
 // user-scoped responses (profile, notifications, broadcasts, enrollments) can
 // never leak across identities. Never called for non-auth reasons.
@@ -322,13 +323,26 @@ export function AuthProvider({ children }) {
 
   // Load any user's profile by uid. Real users read the backend (the server
   // applies its RBAC projection: full for ADMIN, public for APPROVED peers);
-  // dev mock users read the in-memory directory.
+  // dev mock users read the in-memory directory. DEV demo mode: when the backend
+  // has no record for a seeded uid (a demo trainee/trainer viewed from search or
+  // a trainer's trainees list), the read falls back to the seeded profile so
+  // demo profiles stay populated — writes/edits never touch that fallback.
   const getProfileByUid = useCallback(async (uid) => {
     if (!uid) return null
     try {
       if (currentUser?.authSource === 'supabase') {
-        const data = await userApi.getUser(uid)
-        return normalizeProfile(data?.user || null)
+        try {
+          const data = await userApi.getUser(uid)
+          const user = data?.user || null
+          if (user) return normalizeProfile(user)
+        } catch {
+          /* fall through to demo fallback below */
+        }
+        if (DEMO_MODE) {
+          const profile = await userService.getUserProfile(uid)
+          return profile ? normalizeProfile(profile) : null
+        }
+        return null
       }
       const profile = await userService.getUserProfile(uid)
       return normalizeProfile(profile)
