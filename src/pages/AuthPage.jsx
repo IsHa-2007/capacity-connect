@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { CloudSun, Eye, EyeOff, Lock, Mail, MapPin, ShieldCheck, UserRound } from 'lucide-react'
+import { Check, ClipboardCopy, CloudSun, Eye, EyeOff, Lock, Mail, MapPin, ShieldCheck, UserRound } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { STATIONS, EXPERTISE_OPTIONS } from '../data/mockData'
 
@@ -30,6 +30,21 @@ export default function AuthPage() {
   })
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  // Copy-to-clipboard for the SIH demo credentials below. This is purely a text
+  // convenience for the evaluator: it writes the string to the clipboard and
+  // does nothing else. It never reads or writes storage, never calls an auth
+  // API, and cannot grant access by itself.
+  const [copied, setCopied] = useState('')
+  const copy = async (field, value) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(field)
+      setTimeout(() => setCopied((c) => (c === field ? '' : c)), 1800)
+    } catch {
+      setCopied('')
+    }
+  }
 
   const switchMode = (m) => {
     setMode(m)
@@ -279,6 +294,58 @@ export default function AuthPage() {
               Trainee and trainer accounts start pending verification and are
               approved by an administrator. Administrator accounts are
               provisioned server-side only.
+            </p>
+          </div>
+
+          {/* SIH DEMONSTRATION ACCESS — temporary evaluator credentials.
+              DISPLAY ONLY. These are real account credentials that must be typed
+              into the normal Sign In form above, which authenticates through the
+              existing auth provider and then authorises on the server-assigned
+              ADMIN role + approved status. Nothing here bypasses sign-in, creates
+              a session, or grants access; it only shows the text and copies it. */}
+          <div className="mt-4 rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-4 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                SIH Demo Only
+              </span>
+              <p className="font-medium text-amber-900">SIH Demonstration Access</p>
+            </div>
+
+            <p className="mt-2 leading-relaxed text-amber-900/80">
+              Temporary Admin credentials provided exclusively for SIH evaluation and
+              demonstration purposes. These credentials will be removed before
+              production deployment.
+            </p>
+
+            <dl className="mt-3 space-y-2">
+              {[
+                { key: 'email', label: 'Admin ID', value: 'admin.capacityconnect@gmail.com' },
+                { key: 'password', label: 'Password', value: 'admin1234' },
+              ].map(({ key, label, value }) => (
+                <div key={key} className="flex items-center gap-2">
+                  <dt className="w-20 shrink-0 font-medium text-amber-900">{label}</dt>
+                  <dd className="min-w-0 flex-1">
+                    <code className="block truncate rounded-md border border-amber-200 bg-white px-2 py-1.5 font-mono text-xs text-slate-deep">
+                      {value}
+                    </code>
+                  </dd>
+                  <button
+                    type="button"
+                    onClick={() => copy(key, value)}
+                    aria-label={`Copy ${label}`}
+                    title={`Copy ${label}`}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-amber-100"
+                  >
+                    {copied === key ? <Check size={12} /> : <ClipboardCopy size={12} />}
+                    {copied === key ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              ))}
+            </dl>
+
+            <p className="mt-3 leading-relaxed text-amber-900/70">
+              Demo credentials are temporary and intended only for SIH evaluation.
+              Sign in normally with them using the Sign In form above.
             </p>
           </div>
         </div>
